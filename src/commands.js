@@ -867,7 +867,7 @@ async function handleCommand(interaction, client, config) {
       });
     }
 
-    const connection = enable247Voice(guild, targetVoice.id);
+    const connection = await enable247Voice(guild, targetVoice.id);
     if (!connection) {
       return interaction.reply({
         content: `❌ Impossible de rejoindre le salon vocal ${targetVoice}.`,
