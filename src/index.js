@@ -93,11 +93,20 @@ client.once(Events.ClientReady, async readyClient => {
 
   // Auto-reconnect 24/7 voice channels if configured
   try {
-    reconnectAll247Voice(readyClient);
+    reconnectAll247Voice(readyClient, config);
   } catch (err) {
     console.error("[Voice 24/7] Erreur lors de la reconnexion vocale :", err.message);
   }
   console.log("==================================================================");
+});
+
+client.on(Events.GuildCreate, async guild => {
+  console.log(`[Bot Discord] Le bot a rejoint un nouveau serveur : "${guild.name}" (${guild.id}) !`);
+  try {
+    reconnectAll247Voice(client, config);
+  } catch (err) {
+    console.error("[Voice 24/7] Erreur reconnexion sur nouveau serveur :", err.message);
+  }
 });
 
 client.on(Events.InteractionCreate, async interaction => {

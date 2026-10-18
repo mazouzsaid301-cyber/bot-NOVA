@@ -32,6 +32,7 @@ module.exports = {
   corsOrigins: parseCorsOrigins(),
   logChannelId: process.env.LOG_CHANNEL_ID || "",
   ticketCategoryId: process.env.TICKET_CATEGORY_ID || "",
+  voiceChannelId: process.env.VOICE_CHANNEL_ID || "",
   databasePath: process.env.DATABASE_PATH || "",
   nodeEnv: process.env.NODE_ENV || "development",
   validateBotConfig
