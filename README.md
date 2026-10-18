@@ -50,6 +50,7 @@ Plateforme complète d'administration Discord en français comprenant un **bot p
 | `/mod-kick` | Expulser des membres | Expulse un membre après vérification de la hiérarchie des rôles |
 | `/mod-timeout` | Exclure des membres | Exclut temporairement un membre (1 à 40320 minutes) |
 | `/purge` | Gérer les messages | Supprime jusqu'à 100 messages récents dans le salon |
+| `/clean` | Gérer les salons | Vide entièrement un salon textuel de tous ses messages (recréation propre) |
 | `/setup-logs` | Administrateur | Configure le salon textuel de destination des logs d'audit |
 
 ---

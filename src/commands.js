@@ -1,5 +1,5 @@
 const {
-  SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder
+  SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle
 } = require("discord.js");
 const {
   ensureUser,
@@ -108,6 +108,16 @@ const commands = [
     .addIntegerOption(o => o.setName("nombre").setDescription("Nombre de messages à supprimer (1 à 100)").setMinValue(1).setMaxValue(100).setRequired(true)),
 
   new SlashCommandBuilder()
+    .setName("clean")
+    .setDescription("Vide entièrement ce salon textuel de tous ses messages (recréation propre)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addBooleanOption(o =>
+      o.setName("forcer")
+        .setDescription("Vider immédiatement le salon sans demander de confirmation")
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
     .setName("setup-server")
     .setDescription("Crée et organise automatiquement l'architecture complète, salons, catégories et rôles du serveur")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -189,7 +199,7 @@ async function handleCommand(interaction, client, config) {
         },
         {
           name: "⚖️ Modération",
-          value: "• `/mod-ban <membre> [raison]` : Bannit un membre du serveur\n• `/mod-kick <membre> [raison]` : Expulse un membre du serveur\n• `/mod-timeout <membre> <minutes> [raison]` : Exclut temporairement un membre\n• `/purge <nombre>` : Supprime jusqu'à 100 messages récents"
+          value: "• `/mod-ban <membre> [raison]` : Bannit un membre du serveur\n• `/mod-kick <membre> [raison]` : Expulse un membre du serveur\n• `/mod-timeout <membre> <minutes> [raison]` : Exclut temporairement un membre\n• `/purge <nombre>` : Supprime jusqu'à 100 messages récents\n• `/clean [forcer]` : Vide entièrement ce salon textuel (recréation propre)"
         },
         {
           name: "⚙️ Système & Administration",
@@ -682,6 +692,206 @@ async function handleCommand(interaction, client, config) {
       console.error("Erreur purge:", err);
       return interaction.reply({ content: `❌ Erreur lors de la suppression des messages : ${err.message}`, ephemeral: true });
     }
+  }
+
+  // --- /clean ---
+  if (name === "clean") {
+    if (!guild) {
+      return interaction.reply({ content: "❌ Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+    }
+
+    const channel = interaction.channel;
+    if (!channel || channel.type !== ChannelType.GuildText) {
+      return interaction.reply({
+        content: "❌ Cette commande ne peut être exécutée que dans un salon textuel classique.",
+        ephemeral: true
+      });
+    }
+
+    if (channel.isThread()) {
+      return interaction.reply({
+        content: "❌ Cette commande ne peut pas être exécutée dans un fil de discussion (thread).",
+        ephemeral: true
+      });
+    }
+
+    // Check member permissions (ManageChannels or Administrator)
+    const member = interaction.member;
+    const canManageChannels = member?.permissions?.has(PermissionFlagsBits.ManageChannels) ||
+                              member?.permissions?.has(PermissionFlagsBits.Administrator);
+    if (!canManageChannels) {
+      return interaction.reply({
+        content: "❌ Vous n'avez pas la permission requise (`Gérer les salons`) pour vider ce salon.",
+        ephemeral: true
+      });
+    }
+
+    // Check bot permissions
+    const botMember = guild.members.me;
+    if (!botMember?.permissions?.has(PermissionFlagsBits.ManageChannels)) {
+      return interaction.reply({
+        content: "❌ Le bot n'a pas la permission requise `Gérer les salons` pour recréer et vider ce salon.",
+        ephemeral: true
+      });
+    }
+
+    // Protect active tickets
+    const ticket = getTicketByChannel(channel.id);
+    if (ticket && ticket.status === "open") {
+      return interaction.reply({
+        content: "❌ Ce salon est un ticket de support actif. Utilisez `/ticket-close` pour le fermer.",
+        ephemeral: true
+      });
+    }
+
+    // Protect rules channel
+    if (guild.rulesChannelId === channel.id) {
+      return interaction.reply({
+        content: "❌ Ce salon est configuré comme salon de règlement officiel du serveur et ne peut pas être réinitialisé.",
+        ephemeral: true
+      });
+    }
+
+    const executeClean = async () => {
+      const position = channel.rawPosition;
+      const oldName = channel.name;
+      const oldId = channel.id;
+
+      // Clone channel with identical attributes (permissions, topic, parent category, nsfw, slowmode)
+      const newChannel = await channel.clone({
+        reason: `Salon vidé (/clean) par ${interaction.user.tag}`
+      });
+
+      // Maintain exact channel order/position
+      await newChannel.setPosition(position).catch(() => {});
+
+      // Update system channel if needed
+      if (guild.systemChannelId === oldId) {
+        await guild.setSystemChannel(newChannel).catch(() => {});
+      }
+
+      // Update log channel setting in DB if needed
+      const currentLogChannelId = getSetting(`logs:${guild.id}`);
+      if (currentLogChannelId === oldId) {
+        setSetting(`logs:${guild.id}`, newChannel.id);
+      }
+
+      // Delete old channel
+      await channel.delete(`Salon vidé (/clean) par ${interaction.user.tag}`);
+
+      // Send confirmation embed in the newly cleaned channel
+      const cleanEmbed = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle("🧹 Salon Nettoyé")
+        .setDescription(`Ce salon a été entièrement vidé et réinitialisé avec succès.\nAction exécutée par <@${interaction.user.id}>.`)
+        .setFooter({ text: "Bot Tout-en-Un • Nettoyage" })
+        .setTimestamp();
+
+      await newChannel.send({ embeds: [cleanEmbed] }).catch(() => {});
+
+      // Record in moderation actions
+      addModerationAction({
+        guildId: guild.id,
+        actionType: "clean",
+        targetId: newChannel.id,
+        targetTag: `#${newChannel.name}`,
+        moderatorId: interaction.user.id,
+        moderatorTag: interaction.user.tag,
+        reason: "Nettoyage complet du salon (/clean)",
+        details: `Salon recréé (ancien ID: ${oldId}, nouveau ID: ${newChannel.id})`
+      });
+
+      // Log in audit logs
+      await log(guild, "Salon Nettoyé (/clean)", `🧹 Le salon **#${oldName}** a été entièrement vidé et recréé par **${interaction.user.tag}** (${interaction.user.id}).`, 0x5865F2, {
+        category: "moderation",
+        userId: interaction.user.id
+      });
+    };
+
+    const forcer = interaction.options.getBoolean("forcer") || false;
+
+    if (forcer) {
+      await interaction.reply({
+        content: "⏳ Nettoyage et réinitialisation du salon en cours...",
+        ephemeral: true
+      });
+      try {
+        await executeClean();
+      } catch (err) {
+        console.error("Erreur /clean:", err);
+        return interaction.followUp({
+          content: `❌ Erreur lors du nettoyage du salon : ${err.message}`,
+          ephemeral: true
+        }).catch(() => {});
+      }
+      return;
+    }
+
+    // Confirmation buttons
+    const confirmButton = new ButtonBuilder()
+      .setCustomId(`clean_confirm_${interaction.id}`)
+      .setLabel("Confirmer le nettoyage")
+      .setEmoji("🧹")
+      .setStyle(ButtonStyle.Danger);
+
+    const cancelButton = new ButtonBuilder()
+      .setCustomId(`clean_cancel_${interaction.id}`)
+      .setLabel("Annuler")
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Secondary);
+
+    const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+
+    const warningEmbed = new EmbedBuilder()
+      .setColor(0xED4245)
+      .setTitle("⚠️ Confirmation requise : Nettoyage du salon")
+      .setDescription(
+        `Êtes-vous sûr de vouloir **vider entièrement** le salon <#${channel.id}> ?\n\n` +
+        `• **Tous les messages seront définitivement effacés** (même ceux datant de plus de 14 jours)\n` +
+        `• Le salon sera recréé avec les mêmes permissions, nom, catégorie et position\n` +
+        `• Cette action est **irréversible**`
+      )
+      .setFooter({ text: "Vous avez 30 secondes pour valider" });
+
+    const response = await interaction.reply({
+      embeds: [warningEmbed],
+      components: [row],
+      ephemeral: true,
+      fetchReply: true
+    });
+
+    try {
+      const confirmation = await response.awaitMessageComponent({
+        filter: i => i.user.id === interaction.user.id,
+        time: 30000
+      });
+
+      if (confirmation.customId === `clean_confirm_${interaction.id}`) {
+        await confirmation.update({
+          content: "⏳ Nettoyage et réinitialisation du salon en cours...",
+          embeds: [],
+          components: []
+        });
+        await executeClean();
+      } else {
+        await confirmation.update({
+          content: "❌ Nettoyage annulé. Aucune modification n'a été apportée au salon.",
+          embeds: [],
+          components: []
+        });
+      }
+    } catch (err) {
+      if (err.message && err.message.includes("time")) {
+        await interaction.editReply({
+          content: "⏱️ Temps écoulé (30s). Nettoyage annulé par sécurité.",
+          embeds: [],
+          components: []
+        }).catch(() => {});
+      } else if (!channel.deleted) {
+        console.error("Erreur confirmation clean:", err);
+      }
+    }
+    return;
   }
 
   // --- /setup-server ---

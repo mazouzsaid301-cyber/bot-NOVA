@@ -2,18 +2,25 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { commands, checkRoleHierarchy } = require("../src/commands");
 
-test("Commands: all 16 required commands are defined", () => {
+test("Commands: all 17 required commands are defined", () => {
   const expected = [
     "help", "ping", "dashboard", "ticket", "ticket-close",
     "setup-logs", "redeem-create", "redeem", "balance",
     "daily", "pay", "leaderboard", "mod-ban", "mod-kick",
-    "mod-timeout", "purge"
+    "mod-timeout", "purge", "clean"
   ];
 
   const actualNames = commands.map(c => c.name);
   for (const cmd of expected) {
     assert.ok(actualNames.includes(cmd), `La commande /${cmd} doit être enregistrée`);
   }
+});
+
+test("Commands: /clean command is properly configured", () => {
+  const cleanCmd = commands.find(c => c.name === "clean");
+  assert.ok(cleanCmd, "La commande /clean doit exister");
+  assert.equal(typeof cleanCmd.description, "string");
+  assert.ok(cleanCmd.options.some(o => o.name === "forcer"), "L'option 'forcer' doit exister sur /clean");
 });
 
 test("Commands: checkRoleHierarchy blocks self-moderation", () => {
