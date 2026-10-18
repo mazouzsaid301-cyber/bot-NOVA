@@ -25,6 +25,8 @@ const {
 } = require("./db");
 const { log } = require("./logger");
 const { enable247Voice, disable247Voice } = require("./voice");
+const fs = require("fs");
+const path = require("path");
 
 const commands = [
   new SlashCommandBuilder()
@@ -170,7 +172,13 @@ const commands = [
   new SlashCommandBuilder()
     .setName("voice-leave")
     .setDescription("Fait quitter le bot du salon vocal et désactive le mode 24/7")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+
+  new SlashCommandBuilder()
+    .setName("test-welcome")
+    .setDescription("Simule et affiche le message de bienvenue avec le GIF dans le salon welcome")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addUserOption(o => o.setName("membre").setDescription("Membre à tester (optionnel)"))
 ].map(c => c.toJSON());
 
 function checkRoleHierarchy(interaction, targetMember) {
@@ -1492,6 +1500,52 @@ async function handleCommand(interaction, client, config) {
     return log(guild, "Vocal déconnecté", `Le mode vocal 24/7 a été désactivé par ${interaction.user.tag}`, 0xFEE75C, {
       category: "config",
       userId: interaction.user.id
+    });
+  }
+
+  // --- /test-welcome ---
+  if (name === "test-welcome") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+
+    const targetUser = interaction.options.getUser("membre") || interaction.user;
+    const targetMember = guild.members.cache.get(targetUser.id) || interaction.member;
+    const welcomeChannelId = config?.welcomeChannelId || "1561442787679936712";
+    const welcomeChannel = guild.channels.cache.get(welcomeChannelId) || interaction.channel;
+
+    const gifPath = path.join(__dirname, "..", "assets", "nova-pvp-logo.gif");
+    const files = [];
+    const imageAttachmentName = "nova-pvp-logo.gif";
+    if (fs.existsSync(gifPath)) {
+      files.push(new AttachmentBuilder(gifPath, { name: imageAttachmentName }));
+    }
+
+    const welcomeEmbed = new EmbedBuilder()
+      .setColor(0x8B5CF6)
+      .setTitle("⚔️ BIENVENUE DANS L'ARÈNE NOVA PVP !")
+      .setDescription(
+        `Marhba bik ${targetMember} f la communauté officielle **NOVA PVP** ! 🏆\n\n` +
+        `🔥 Prépare ton stuff, trouve ton équipe et domine l'arène !\n\n` +
+        `📜・**Règles du serveur :** <#1561442792729739385>\n` +
+        `🎭・**Choisis tes rôles :** <#1558904477996548120>\n` +
+        `💬・**Chat général :** <#1561442800455647322>\n` +
+        `⚔️・**Arène PVP & Matchmaking :** <#1561442812216615052>\n` +
+        `🎫・**Besoin d'aide ? :** <#1561442825218822164>\n\n` +
+        `Tu es notre **${guild.memberCount}ème combattant** ! ⚡`
+      )
+      .setThumbnail(targetUser.displayAvatarURL({ dynamic: true, size: 256 }))
+      .setImage(files.length > 0 ? `attachment://${imageAttachmentName}` : "https://cdn.discordapp.com/attachments/1561275464243478678/1561452111571456164/nova-pvp-logo.gif")
+      .setFooter({ text: "NOVA PVP SYSTEME • Prépare-toi au combat !" })
+      .setTimestamp();
+
+    await welcomeChannel.send({
+      content: `👋 Bienvenue ${targetMember} sur le serveur **NOVA PVP** ! ⚔️`,
+      embeds: [welcomeEmbed],
+      files
+    });
+
+    return interaction.reply({
+      content: `✅ Message de bienvenue officiel NOVA PVP envoyé avec succès dans ${welcomeChannel} !`,
+      ephemeral: true
     });
   }
 }

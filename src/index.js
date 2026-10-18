@@ -1,4 +1,6 @@
-const { Client, GatewayIntentBits, REST, Routes, Events, ActivityType, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
+const fs = require("fs");
+const path = require("path");
+const { Client, GatewayIntentBits, REST, Routes, Events, ActivityType, EmbedBuilder, PermissionFlagsBits, AttachmentBuilder } = require("discord.js");
 const config = require("./config");
 const { commands, handleCommand, handleButton } = require("./commands");
 const { startDashboard } = require("./dashboard");
@@ -18,15 +20,13 @@ if (missingConfig.length > 0) {
   process.exit(1);
 }
 
-// Client intents: Guilds and GuildVoiceStates are standard and non-privileged.
+// Client intents: Guilds, Voice, Messages, and Members
 const intents = [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildVoiceStates,
-  GatewayIntentBits.GuildMessages
+  GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.GuildMembers
 ];
-if (process.env.ENABLE_GUILD_MEMBERS_INTENT === "true") {
-  intents.push(GatewayIntentBits.GuildMembers);
-}
 if (process.env.ENABLE_MESSAGE_CONTENT_INTENT === "true") {
   intents.push(GatewayIntentBits.MessageContent);
 }
@@ -153,11 +153,64 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-client.on(Events.GuildMemberAdd, member => {
+client.on(Events.GuildMemberAdd, async member => {
+  // 1. Audit log
   log(member.guild, "Nouveau membre", `📥 **${member.user.tag}** (${member.id}) a rejoint le serveur.`, 0x57F287, {
     category: "member",
     userId: member.id
   });
+
+  // 2. Auto-role: 👥・Members (1561289752932786197) if available
+  try {
+    const memberRole = member.guild.roles.cache.get("1561289752932786197") || member.guild.roles.cache.find(r => r.name.includes("Members"));
+    if (memberRole && member.guild.members.me.roles.highest.position > memberRole.position) {
+      await member.roles.add(memberRole).catch(() => {});
+    }
+  } catch (err) {
+    console.error("[AutoRole Error]:", err.message);
+  }
+
+  // 3. Welcome notification in 👋・welcome (1561442787679936712) with nova-pvp-logo.gif
+  try {
+    const welcomeChannelId = config.welcomeChannelId || "1561442787679936712";
+    const welcomeChannel = member.guild.channels.cache.get(welcomeChannelId) || member.guild.channels.cache.find(c => c.name.includes("welcome"));
+
+    if (welcomeChannel && welcomeChannel.permissionsFor(member.guild.members.me)?.has(PermissionFlagsBits.SendMessages)) {
+      const gifPath = path.join(__dirname, "..", "assets", "nova-pvp-logo.gif");
+      const files = [];
+      const imageAttachmentName = "nova-pvp-logo.gif";
+
+      if (fs.existsSync(gifPath)) {
+        files.push(new AttachmentBuilder(gifPath, { name: imageAttachmentName }));
+      }
+
+      const welcomeEmbed = new EmbedBuilder()
+        .setColor(0x8B5CF6) // Electric Violet NOVA Theme
+        .setTitle("⚔️ BIENVENUE DANS L'ARÈNE NOVA PVP !")
+        .setDescription(
+          `Marhba bik ${member} f la communauté officielle **NOVA PVP** ! 🏆\n\n` +
+          `🔥 Prépare ton stuff, trouve ton équipe et domine l'arène !\n\n` +
+          `📜・**Règles du serveur :** <#1561442792729739385>\n` +
+          `🎭・**Choisis tes rôles :** <#1558904477996548120>\n` +
+          `💬・**Chat général :** <#1561442800455647322>\n` +
+          `⚔️・**Arène PVP & Matchmaking :** <#1561442812216615052>\n` +
+          `🎫・**Besoin d'aide ? :** <#1561442825218822164>\n\n` +
+          `Tu es notre **${member.guild.memberCount}ème combattant** ! ⚡`
+        )
+        .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
+        .setImage(files.length > 0 ? `attachment://${imageAttachmentName}` : "https://cdn.discordapp.com/attachments/1561275464243478678/1561452111571456164/nova-pvp-logo.gif")
+        .setFooter({ text: "NOVA PVP SYSTEME • Prépare-toi au combat !" })
+        .setTimestamp();
+
+      await welcomeChannel.send({
+        content: `👋 Bienvenue ${member} sur le serveur **NOVA PVP** ! ⚔️`,
+        embeds: [welcomeEmbed],
+        files
+      }).catch(err => console.error("[Welcome Send Error]:", err.message));
+    }
+  } catch (err) {
+    console.error("[Welcome Notification Error]:", err.message);
+  }
 });
 
 client.on(Events.GuildMemberRemove, member => {

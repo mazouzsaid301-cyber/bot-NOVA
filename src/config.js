@@ -31,6 +31,7 @@ module.exports = {
   apiBaseUrl: process.env.API_BASE_URL || "",
   corsOrigins: parseCorsOrigins(),
   logChannelId: process.env.LOG_CHANNEL_ID || "",
+  welcomeChannelId: process.env.WELCOME_CHANNEL_ID || "1561442787679936712",
   ticketCategoryId: process.env.TICKET_CATEGORY_ID || "",
   voiceChannelId: process.env.VOICE_CHANNEL_ID || "",
   databasePath: process.env.DATABASE_PATH || "",
