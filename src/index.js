@@ -10,43 +10,71 @@ const missingConfig = config.validateBotConfig();
 if (missingConfig.length > 0) {
   console.error("==================================================================");
   console.error("ERREUR DE CONFIGURATION CRITIQUE :");
-  console.error(`Les variables d'environnement suivantes sont manquantes ou par défaut :`);
+  console.error("Les variables d'environnement suivantes sont manquantes ou invalides :");
   console.error(missingConfig.map(k => `  - ${k}`).join("\n"));
   console.error("Veuillez renseigner votre fichier .env avant de démarrer le bot.");
   console.error("==================================================================");
   process.exit(1);
 }
 
+// Client intents: GatewayIntentBits.Guilds is standard and non-privileged.
+// GuildMembers is privileged (requires toggle in Developer Portal > Bot > Privileged Gateway Intents).
+const intents = [GatewayIntentBits.Guilds];
+if (process.env.ENABLE_GUILD_MEMBERS_INTENT === "true") {
+  intents.push(GatewayIntentBits.GuildMembers);
+}
+
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers
-  ],
+  intents,
   allowedMentions: { parse: ["users", "roles"], repliedUser: false }
 });
 
 let httpServer = null;
 
 async function registerCommands() {
+  const rest = new REST({ version: "10" }).setToken(config.token);
+
+  // 1. Register global slash commands so they work in all servers
   try {
-    const rest = new REST({ version: "10" }).setToken(config.token);
-    if (config.guildId) {
-      console.log(`[Commands] Enregistrement de ${commands.length} commandes slash sur le serveur ${config.guildId}...`);
-      await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body: commands });
-      console.log(`[Commands] Commandes slash enregistrées avec succès sur le serveur ${config.guildId}.`);
-    } else {
-      console.log(`[Commands] Aucun GUILD_ID spécifié, enregistrement des commandes de manière globale...`);
-      await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
-      console.log(`[Commands] Commandes slash globales enregistrées avec succès.`);
-    }
+    await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
+    console.log(`[Commands] ${commands.length} commandes slash globales enregistrées avec succès.`);
   } catch (error) {
-    console.error("[Commands] Erreur lors de l'enregistrement des commandes slash :", error.message);
+    console.warn(`[Commands] Note enregistrement global : ${error.message}`);
+  }
+
+  // 2. If a specific guildId is configured, register directly for instant dev refresh
+  if (config.guildId) {
+    try {
+      await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body: commands });
+      console.log(`[Commands] Commandes slash synchronisées sur le serveur ${config.guildId}.`);
+    } catch (error) {
+      if (error.message && error.message.includes("Missing Access")) {
+        console.warn(`[Commands] Note : Le bot n'est pas encore sur le serveur ${config.guildId}.`);
+        console.warn(`[Commands] Invitez le bot avec ce lien :`);
+        console.warn(`  https://discord.com/oauth2/authorize?client_id=${config.clientId}&scope=bot%20applications.commands&permissions=8`);
+      } else {
+        console.warn(`[Commands] Enregistrement serveur (${config.guildId}) : ${error.message}`);
+      }
+    }
   }
 }
 
 client.once(Events.ClientReady, async readyClient => {
-  console.log(`[Bot Discord] Connecté avec succès : ${readyClient.user.tag}`);
+  console.log("==================================================================");
+  console.log(`[Bot Discord] Connecté avec succès en tant que : ${readyClient.user.tag}`);
   console.log(`[Bot Discord] Présent sur ${readyClient.guilds.cache.size} serveur(s).`);
+
+  if (readyClient.guilds.cache.size === 0) {
+    console.log("------------------------------------------------------------------");
+    console.log("ATTENTION : Le bot n'a pas encore rejoint votre serveur Discord !");
+    console.log("Ouvrez ce lien dans votre navigateur pour l'inviter :");
+    console.log(`👉 https://discord.com/oauth2/authorize?client_id=${config.clientId}&scope=bot%20applications.commands&permissions=8`);
+    console.log("------------------------------------------------------------------");
+  } else {
+    readyClient.guilds.cache.forEach(g => {
+      console.log(`  - Serveur : "${g.name}" (ID: ${g.id}, ${g.memberCount} membres)`);
+    });
+  }
 
   // Set bot presence
   try {
@@ -62,6 +90,7 @@ client.once(Events.ClientReady, async readyClient => {
   } catch (err) {
     console.error("[API Dashboard] Erreur lors du lancement du serveur HTTP :", err.message);
   }
+  console.log("==================================================================");
 });
 
 client.on(Events.InteractionCreate, async interaction => {
