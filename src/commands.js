@@ -104,7 +104,12 @@ const commands = [
     .setName("purge")
     .setDescription("Supprime jusqu'à 100 messages récents dans ce salon")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addIntegerOption(o => o.setName("nombre").setDescription("Nombre de messages à supprimer (1 à 100)").setMinValue(1).setMaxValue(100).setRequired(true))
+    .addIntegerOption(o => o.setName("nombre").setDescription("Nombre de messages à supprimer (1 à 100)").setMinValue(1).setMaxValue(100).setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName("setup-server")
+    .setDescription("Crée et organise automatiquement l'architecture complète, salons, catégories et rôles du serveur")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(c => c.toJSON());
 
 function checkRoleHierarchy(interaction, targetMember) {
@@ -664,6 +669,165 @@ async function handleCommand(interaction, client, config) {
     } catch (err) {
       console.error("Erreur purge:", err);
       return interaction.reply({ content: `❌ Erreur lors de la suppression des messages : ${err.message}`, ephemeral: true });
+    }
+  }
+
+  // --- /setup-server ---
+  if (name === "setup-server") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      // 1. Role Staff
+      let staffRole = guild.roles.cache.find(r => r.name === "🛡️ Staff" || r.name.toLowerCase().includes("staff"));
+      if (!staffRole) {
+        staffRole = await guild.roles.create({
+          name: "🛡️ Staff",
+          color: 0x5865F2,
+          permissions: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ManageMessages,
+            PermissionFlagsBits.KickMembers,
+            PermissionFlagsBits.ModerateMembers
+          ],
+          reason: "Configuration automatique de l'architecture serveur"
+        });
+      }
+
+      // 2. Category: INFORMATIONS
+      const infoCat = await guild.channels.create({
+        name: "📢 ┃ INFORMATIONS",
+        type: ChannelType.GuildCategory
+      });
+
+      await guild.channels.create({
+        name: "📌・règlement",
+        type: ChannelType.GuildText,
+        parent: infoCat.id,
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] }
+        ]
+      });
+
+      await guild.channels.create({
+        name: "📢・annonces",
+        type: ChannelType.GuildText,
+        parent: infoCat.id,
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] }
+        ]
+      });
+
+      await guild.channels.create({
+        name: "🎁・giveaways-redeem",
+        type: ChannelType.GuildText,
+        parent: infoCat.id
+      });
+
+      // 3. Category: COMMUNAUTÉ
+      const commCat = await guild.channels.create({
+        name: "💬 ┃ COMMUNAUTÉ",
+        type: ChannelType.GuildCategory
+      });
+
+      await guild.channels.create({
+        name: "💬・général",
+        type: ChannelType.GuildText,
+        parent: commCat.id
+      });
+
+      await guild.channels.create({
+        name: "🤖・commandes-bot",
+        type: ChannelType.GuildText,
+        parent: commCat.id
+      });
+
+      await guild.channels.create({
+        name: "💰・casino-économie",
+        type: ChannelType.GuildText,
+        parent: commCat.id
+      });
+
+      // 4. Category: SUPPORT & TICKETS
+      const ticketCat = await guild.channels.create({
+        name: "🎫 ┃ SUPPORT & TICKETS",
+        type: ChannelType.GuildCategory
+      });
+
+      const ticketNoticeChan = await guild.channels.create({
+        name: "🎫・ouvrir-un-ticket",
+        type: ChannelType.GuildText,
+        parent: ticketCat.id,
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] }
+        ]
+      });
+
+      const ticketEmbed = new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setTitle("🎫 Centre de Support & Tickets")
+        .setDescription("Besoin d'aide ou d'une question pour l'équipe ?\n\nTapez la commande **/ticket** pour ouvrir instantanément un salon privé avec le staff !")
+        .setFooter({ text: "Système de tickets sécurisé • mazoodev.com" });
+
+      await ticketNoticeChan.send({ embeds: [ticketEmbed] }).catch(() => {});
+
+      // 5. Category: ADMINISTRATION (Private)
+      const adminCat = await guild.channels.create({
+        name: "🛡️ ┃ ADMINISTRATION",
+        type: ChannelType.GuildCategory,
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+          { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] }
+        ]
+      });
+
+      const logChan = await guild.channels.create({
+        name: "🚨・logs-audit",
+        type: ChannelType.GuildText,
+        parent: adminCat.id,
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages] },
+          { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] }
+        ]
+      });
+
+      await guild.channels.create({
+        name: "💼・salon-staff",
+        type: ChannelType.GuildText,
+        parent: adminCat.id
+      });
+
+      // Automatically configure database settings for this server
+      setSetting(`logs:${guild.id}`, logChan.id);
+      setSetting(`ticket_category:${guild.id}`, ticketCat.id);
+
+      const successEmbed = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle("✨ Serveur Discord Stylisé et Configuré !")
+        .setDescription([
+          "L'architecture complète de votre serveur a été générée avec succès :",
+          "• **Catégories créées :** Informations, Communauté, Support & Tickets, Administration",
+          "• **Salons créés :** Règlement, Annonces, Général, Commandes, Économie, Tickets, Logs Staff",
+          `• **Salon des logs configuré :** <#${logChan.id}>`,
+          `• **Catégorie des tickets configurée :** ${ticketCat.name}`,
+          `• **Rôle Staff configuré :** <@&${staffRole.id}>`
+        ].join("\n"))
+        .setFooter({ text: "Génération automatique par Mazoodev Bot" })
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [successEmbed] });
+
+      return log(guild, "Architecture Serveur", `L'architecture complète du serveur a été configurée par ${interaction.user.tag}`, 0x57F287, {
+        category: "config",
+        userId: interaction.user.id
+      });
+    } catch (err) {
+      console.error("Erreur setup-server:", err);
+      return interaction.editReply({ content: `❌ Erreur lors de la configuration automatique : ${err.message}. Assurez-vous que le rôle du bot possède les permissions Administrateur ou Gérer les salons / rôles.` });
     }
   }
 }
