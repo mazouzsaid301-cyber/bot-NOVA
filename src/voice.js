@@ -31,7 +31,7 @@ async function connectToVoice(guild, channelId) {
       guildId: guild.id,
       adapterCreator: guild.voiceAdapterCreator,
       selfDeaf: true,
-      selfMute: false
+      selfMute: true
     });
 
     activeConnections.set(guild.id, connection);
