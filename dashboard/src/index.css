@@ -549,9 +549,17 @@ body {
   box-shadow: 0 0 10px var(--blurple-glow);
 }
 
+#root {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Login Page Styling */
 .login-container {
   min-height: 100vh;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -559,15 +567,18 @@ body {
 }
 
 .login-card {
-  background: var(--bg-card);
+  background: #131c31;
+  background: rgba(19, 28, 49, 0.95);
   backdrop-filter: blur(20px);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid rgba(88, 101, 242, 0.35);
   border-radius: 20px;
   width: 100%;
   max-width: 440px;
   padding: 40px;
-  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.8), 0 0 40px rgba(88, 101, 242, 0.15);
   text-align: center;
+  position: relative;
+  z-index: 10;
 }
 
 .login-icon-box {

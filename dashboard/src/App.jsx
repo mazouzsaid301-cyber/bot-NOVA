@@ -524,7 +524,7 @@ export default function App() {
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <span style={{ color: "var(--text-muted)" }}>Version Node.js :</span>
-                      <span className="mono-tag">{stats?.bot?.nodeVersion || process.version}</span>
+                      <span className="mono-tag">{stats?.bot?.nodeVersion || "Node.js v20+"}</span>
                     </div>
                   </div>
                 </div>
