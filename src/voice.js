@@ -1,7 +1,9 @@
 const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } = require("@discordjs/voice");
 const { getSetting, setSetting } = require("./db");
+const { log } = require("./logger");
 
 const activeConnections = new Map();
+const voiceActivity = new Map(); // key: memberId, value: timestamp of last active
 
 async function connectToVoice(guild, channelId) {
   try {
@@ -135,6 +137,81 @@ function setupVoiceWatchers(client) {
       }
     }
   }, 15000);
+
+  // Tracking de l'activité vocale (Détection AFK > 1 heure)
+  client.on("voiceStateUpdate", (oldState, newState) => {
+    const member = newState.member || oldState.member;
+    if (!member || member.user.bot) return;
+
+    // Si le membre quitte complètement le vocal
+    if (!newState.channelId) {
+      voiceActivity.delete(member.id);
+      return;
+    }
+
+    // Si le membre a changé de salon ou vient de se connecter
+    if (oldState.channelId !== newState.channelId) {
+      voiceActivity.set(member.id, Date.now());
+      return;
+    }
+
+    // Si le membre s'est démute / réactivé le micro, réinitialiser le compteur d'inactivité
+    const wasMuted = oldState.selfMute || oldState.serverMute || oldState.selfDeaf || oldState.serverDeaf;
+    const isMuted = newState.selfMute || newState.serverMute || newState.selfDeaf || newState.serverDeaf;
+    if (wasMuted && !isMuted) {
+      voiceActivity.set(member.id, Date.now());
+    } else if (!voiceActivity.has(member.id)) {
+      voiceActivity.set(member.id, Date.now());
+    }
+  });
+
+  // Vérification périodique toutes les minutes de l'inactivité > 1h (3600000 ms)
+  setInterval(async () => {
+    const ONE_HOUR = 3600000;
+    const now = Date.now();
+
+    for (const [, guild] of client.guilds.cache) {
+      // Trouver le salon AFK officiel du serveur ou un salon contenant "afk"
+      let afkChannelId = guild.afkChannelId;
+      if (!afkChannelId) {
+        const afkChan = guild.channels.cache.find(c =>
+          c.isVoiceBased() && (c.name.toLowerCase().includes("afk") || c.name.toLowerCase().includes("sleep"))
+        );
+        afkChannelId = afkChan?.id;
+      }
+
+      if (!afkChannelId) continue;
+
+      for (const [memberId, state] of guild.voiceStates.cache) {
+        if (!state.channelId || state.channelId === afkChannelId) continue;
+        const member = state.member;
+        if (!member || member.user.bot) continue;
+
+        if (!voiceActivity.has(memberId)) {
+          voiceActivity.set(memberId, now);
+          continue;
+        }
+
+        const lastActive = voiceActivity.get(memberId);
+        const isInactive = state.selfMute || state.serverMute || state.selfDeaf || state.serverDeaf;
+
+        // Si le membre est inactif/mute depuis plus d'une heure
+        if (isInactive && now - lastActive >= ONE_HOUR) {
+          try {
+            await member.voice.setChannel(afkChannelId, "Inactivité vocale supérieure à 1 heure");
+            voiceActivity.set(memberId, now);
+            console.log(`[AFK Voice] Membre ${member.user.tag} déplacé vers le salon AFK après 1 heure d'inactivité.`);
+            log(guild, "Déplacement Vocal AFK", `💤 **${member.user.tag}** (${member.id}) a été déplacé vers le salon AFK après 1 heure d'inactivité vocale.`, 0xFEE75C, {
+              category: "voice",
+              userId: member.id
+            });
+          } catch (err) {
+            console.warn(`[AFK Voice Note] Impossible de déplacer ${member.user.tag}:`, err.message);
+          }
+        }
+      }
+    }
+  }, 60000);
 }
 
 async function reconnectAll247Voice(client, config = {}) {
