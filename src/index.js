@@ -4,6 +4,7 @@ const { commands, handleCommand } = require("./commands");
 const { startDashboard } = require("./dashboard");
 const { log } = require("./logger");
 const { db } = require("./db");
+const { reconnectAll247Voice } = require("./voice");
 
 // Validate environment variables on startup
 const missingConfig = config.validateBotConfig();
@@ -17,9 +18,8 @@ if (missingConfig.length > 0) {
   process.exit(1);
 }
 
-// Client intents: GatewayIntentBits.Guilds is standard and non-privileged.
-// GuildMembers is privileged (requires toggle in Developer Portal > Bot > Privileged Gateway Intents).
-const intents = [GatewayIntentBits.Guilds];
+// Client intents: Guilds and GuildVoiceStates are standard and non-privileged.
+const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates];
 if (process.env.ENABLE_GUILD_MEMBERS_INTENT === "true") {
   intents.push(GatewayIntentBits.GuildMembers);
 }
@@ -89,6 +89,13 @@ client.once(Events.ClientReady, async readyClient => {
     httpServer = startDashboard(client, config);
   } catch (err) {
     console.error("[API Dashboard] Erreur lors du lancement du serveur HTTP :", err.message);
+  }
+
+  // Auto-reconnect 24/7 voice channels if configured
+  try {
+    reconnectAll247Voice(readyClient);
+  } catch (err) {
+    console.error("[Voice 24/7] Erreur lors de la reconnexion vocale :", err.message);
   }
   console.log("==================================================================");
 });

@@ -18,6 +18,7 @@ const {
   addModerationAction
 } = require("./db");
 const { log } = require("./logger");
+const { enable247Voice, disable247Voice } = require("./voice");
 
 const commands = [
   new SlashCommandBuilder()
@@ -109,7 +110,18 @@ const commands = [
   new SlashCommandBuilder()
     .setName("setup-server")
     .setDescription("Crée et organise automatiquement l'architecture complète, salons, catégories et rôles du serveur")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("voice-24-7")
+    .setDescription("Connecte le bot en permanence (24h/24 7j/7) dans un salon vocal")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addChannelOption(o => o.setName("salon").setDescription("Salon vocal cible (optionnel, prend votre salon actuel si vide)").addChannelTypes(ChannelType.GuildVoice).setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("voice-leave")
+    .setDescription("Fait quitter le bot du salon vocal et désactive le mode 24/7")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
 ].map(c => c.toJSON());
 
 function checkRoleHierarchy(interaction, targetMember) {
@@ -829,6 +841,76 @@ async function handleCommand(interaction, client, config) {
       console.error("Erreur setup-server:", err);
       return interaction.editReply({ content: `❌ Erreur lors de la configuration automatique : ${err.message}. Assurez-vous que le rôle du bot possède les permissions Administrateur ou Gérer les salons / rôles.` });
     }
+  }
+
+  // --- /voice-24-7 ---
+  if (name === "voice-24-7") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+
+    let targetVoice = interaction.options.getChannel("salon");
+    if (!targetVoice) {
+      targetVoice = interaction.member.voice?.channel;
+    }
+
+    if (!targetVoice || !targetVoice.isVoiceBased()) {
+      return interaction.reply({
+        content: "❌ Vous devez soit vous connecter à un salon vocal, soit mentionner un salon vocal cible dans la commande (`/voice-24-7 salon: #nom`).",
+        ephemeral: true
+      });
+    }
+
+    const botMember = guild.members.me;
+    if (!targetVoice.permissionsFor(botMember)?.has([PermissionFlagsBits.Connect, PermissionFlagsBits.ViewChannel])) {
+      return interaction.reply({
+        content: `❌ Le bot n'a pas la permission de se connecter au salon vocal ${targetVoice}. Vérifiez les permissions de ce salon.`,
+        ephemeral: true
+      });
+    }
+
+    const connection = enable247Voice(guild, targetVoice.id);
+    if (!connection) {
+      return interaction.reply({
+        content: `❌ Impossible de rejoindre le salon vocal ${targetVoice}.`,
+        ephemeral: true
+      });
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x57F287)
+      .setTitle("🔊 Mode Vocal 24/7 Activé")
+      .setDescription([
+        `Le bot est désormais connecté en permanence dans : ${targetVoice}`,
+        "",
+        "• **Persistance :** Le bot restera dans ce salon 24h/24 7j/7.",
+        "• **Auto-reconnexion :** En cas de redémarrage ou déconnexion, il rejoindra automatiquement ce salon.",
+        "• **Pour le retirer :** Utilisez la commande `/voice-leave`."
+      ].join("\n"))
+      .setFooter({ text: "Système Vocal Persistant 24/7 • mazoodev.com" })
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed] });
+
+    return log(guild, "Mode Vocal 24/7", `Le bot a été configuré en vocal 24/7 dans ${targetVoice} par ${interaction.user.tag}`, 0x57F287, {
+      category: "config",
+      userId: interaction.user.id
+    });
+  }
+
+  // --- /voice-leave ---
+  if (name === "voice-leave") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+
+    disable247Voice(guild);
+
+    await interaction.reply({
+      content: "🔇 Le bot a quitté le salon vocal et le mode 24/7 a été désactivé pour ce serveur.",
+      ephemeral: true
+    });
+
+    return log(guild, "Vocal déconnecté", `Le mode vocal 24/7 a été désactivé par ${interaction.user.tag}`, 0xFEE75C, {
+      category: "config",
+      userId: interaction.user.id
+    });
   }
 }
 
