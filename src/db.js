@@ -75,7 +75,10 @@ CREATE TABLE IF NOT EXISTS users (
   balance INTEGER NOT NULL DEFAULT 0,
   last_daily INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL DEFAULT 0
+  updated_at INTEGER NOT NULL DEFAULT 0,
+  xp INTEGER NOT NULL DEFAULT 0,
+  level INTEGER NOT NULL DEFAULT 0,
+  last_xp_at INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS redeem_codes (
@@ -137,12 +140,23 @@ CREATE TABLE IF NOT EXISTS economy_transactions (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ticket_transcripts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel_id TEXT NOT NULL,
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  closed_by TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_tickets_guild_status ON tickets(guild_id, status);
 CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_guild ON audit_logs(guild_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_moderation_guild ON moderation_actions(guild_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_economy_tx_created ON economy_transactions(created_at DESC);
-`);
+CREATE INDEX IF NOT EXISTS idx_transcripts_guild ON ticket_transcripts(guild_id, created_at DESC);
+` );
 
 // Migration checks for existing databases
 function runMigrations() {
@@ -163,13 +177,22 @@ function runMigrations() {
     if (!userColNames.includes("updated_at")) {
       db.exec("ALTER TABLE users ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;");
     }
+    if (!userColNames.includes("xp")) {
+      db.exec("ALTER TABLE users ADD COLUMN xp INTEGER NOT NULL DEFAULT 0;");
+    }
+    if (!userColNames.includes("level")) {
+      db.exec("ALTER TABLE users ADD COLUMN level INTEGER NOT NULL DEFAULT 0;");
+    }
+    if (!userColNames.includes("last_xp_at")) {
+      db.exec("ALTER TABLE users ADD COLUMN last_xp_at INTEGER NOT NULL DEFAULT 0;");
+    }
   } catch {}
 }
 runMigrations();
 
 function ensureUser(userId) {
   const now = Date.now();
-  db.prepare("INSERT OR IGNORE INTO users (user_id, balance, last_daily, created_at, updated_at) VALUES (?, 0, 0, ?, ?)")
+  db.prepare("INSERT OR IGNORE INTO users (user_id, balance, last_daily, created_at, updated_at, xp, level, last_xp_at) VALUES (?, 0, 0, ?, ?, 0, 0, 0)")
     .run(userId, now, now);
 }
 
@@ -401,6 +424,76 @@ function getAllSettings() {
   return obj;
 }
 
+function getXpForLevel(level) {
+  if (!level || level <= 0) return 0;
+  return Math.floor(100 * Math.pow(level, 1.5));
+}
+
+function getLevelFromXp(xp) {
+  if (!xp || xp < 100) return 0;
+  let level = 0;
+  while (getXpForLevel(level + 1) <= xp) {
+    level++;
+  }
+  return level;
+}
+
+function addXp(userId, amount = 20, cooldownMs = 60000) {
+  const numAmount = Math.max(1, Math.floor(Number(amount) || 20));
+  const tx = db.transaction(() => {
+    ensureUser(userId);
+    const user = db.prepare("SELECT xp, level, last_xp_at FROM users WHERE user_id = ?").get(userId);
+    const now = Date.now();
+    const elapsed = now - (user.last_xp_at || 0);
+    if (elapsed < cooldownMs) {
+      return {
+        success: false,
+        reason: "cooldown",
+        remainingMs: cooldownMs - elapsed,
+        totalXp: user.xp || 0,
+        level: user.level || 0
+      };
+    }
+
+    const currentXp = user.xp || 0;
+    const oldLevel = user.level || 0;
+    const newXp = currentXp + numAmount;
+    const newLevel = getLevelFromXp(newXp);
+    const leveledUp = newLevel > oldLevel;
+
+    db.prepare("UPDATE users SET xp = ?, level = ?, last_xp_at = ?, updated_at = ? WHERE user_id = ?")
+      .run(newXp, newLevel, now, now, userId);
+
+    return {
+      success: true,
+      amountGained: numAmount,
+      totalXp: newXp,
+      oldLevel,
+      newLevel,
+      leveledUp
+    };
+  });
+
+  return tx();
+}
+
+function getXpLeaderboard(limit = 10) {
+  const safeLimit = Math.min(Math.max(1, Number(limit) || 10), 100);
+  return db.prepare("SELECT user_id, xp, level FROM users WHERE xp > 0 ORDER BY level DESC, xp DESC LIMIT ?").all(safeLimit);
+}
+
+function saveTicketTranscript(channelId, guildId, userId, closedBy, content) {
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO ticket_transcripts (channel_id, guild_id, user_id, closed_by, content, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(channelId, guildId, userId, closedBy, String(content || ""), now);
+}
+
+function getTicketTranscript(channelId) {
+  return db.prepare("SELECT * FROM ticket_transcripts WHERE channel_id = ?").get(channelId);
+}
+
 module.exports = {
   db,
   ensureUser,
@@ -418,6 +511,8 @@ module.exports = {
   getOpenTicketForUser,
   listTickets,
   countTickets,
+  saveTicketTranscript,
+  getTicketTranscript,
   addAuditLog,
   listAuditLogs,
   addModerationAction,
@@ -425,5 +520,9 @@ module.exports = {
   getEconomyStats,
   getSetting,
   setSetting,
-  getAllSettings
+  getAllSettings,
+  getXpForLevel,
+  getLevelFromXp,
+  addXp,
+  getXpLeaderboard
 };

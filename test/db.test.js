@@ -33,7 +33,13 @@ const {
   listModerationActions,
   getEconomyStats,
   getSetting,
-  setSetting
+  setSetting,
+  addXp,
+  getXpForLevel,
+  getLevelFromXp,
+  getXpLeaderboard,
+  saveTicketTranscript,
+  getTicketTranscript
 } = require("../src/db");
 
 test("Database: user initialization and balance", () => {
@@ -182,4 +188,44 @@ test("Database: settings storage and retrieval", () => {
   assert.equal(getSetting("test_key"), "test_value_123");
   setSetting("test_key", "updated_value_456");
   assert.equal(getSetting("test_key"), "updated_value_456");
+});
+
+test("Database: XP formulas, leveling progression, and cooldowns", () => {
+  assert.equal(getXpForLevel(0), 0);
+  assert.equal(getXpForLevel(1), 100);
+  assert.equal(getLevelFromXp(50), 0);
+  assert.equal(getLevelFromXp(100), 1);
+  assert.equal(getLevelFromXp(290), 2);
+
+  // Add XP without cooldown
+  const res1 = addXp("xp-user-1", 50, 0);
+  assert.equal(res1.success, true);
+  assert.equal(res1.totalXp, 50);
+  assert.equal(res1.newLevel, 0);
+  assert.equal(res1.leveledUp, false);
+
+  // Level up to level 1
+  const res2 = addXp("xp-user-1", 60, 0);
+  assert.equal(res2.success, true);
+  assert.equal(res2.totalXp, 110);
+  assert.equal(res2.newLevel, 1);
+  assert.equal(res2.leveledUp, true);
+
+  // Enforce cooldown
+  const resCooldown = addXp("xp-user-1", 20, 60000);
+  assert.equal(resCooldown.success, false);
+  assert.equal(resCooldown.reason, "cooldown");
+
+  // Leaderboard
+  const lb = getXpLeaderboard(5);
+  assert.ok(lb.length > 0);
+  assert.equal(lb[0].user_id, "xp-user-1");
+});
+
+test("Database: ticket transcripts saving and retrieval", () => {
+  saveTicketTranscript("chan-999", "guild-1", "user-1", "mod-1", "[12:00] User: Help please\n[12:01] Mod: Resolved.");
+  const transcript = getTicketTranscript("chan-999");
+  assert.ok(transcript);
+  assert.equal(transcript.channel_id, "chan-999");
+  assert.match(transcript.content, /Help please/);
 });

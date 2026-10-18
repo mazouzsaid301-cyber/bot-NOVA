@@ -51,6 +51,11 @@ Plateforme complète d'administration Discord en français comprenant un **bot p
 | `/mod-timeout` | Exclure des membres | Exclut temporairement un membre (1 à 40320 minutes) |
 | `/purge` | Gérer les messages | Supprime jusqu'à 100 messages récents dans le salon |
 | `/clean` | Gérer les salons | Vide entièrement un salon textuel de tous ses messages (recréation propre) |
+| `/rank` | Tout le monde | Affiche le niveau, l'XP et la carte de progression du joueur |
+| `/rewards-info` | Tout le monde | Affiche les paliers de récompenses et privilèges NOVA PVP |
+| `/ticket-panel` | Administrateur | Déploie le panneau interactif d'ouverture de tickets dans le salon |
+| `/roles-panel` | Administrateur | Déploie le sélecteur interactif de plateformes et rôles |
+| `/setup-nova` | Administrateur | Initialise automatiquement l'architecture complète du serveur NOVA PVP |
 | `/setup-logs` | Administrateur | Configure le salon textuel de destination des logs d'audit |
 
 ---

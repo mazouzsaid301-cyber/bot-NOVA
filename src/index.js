@@ -1,9 +1,9 @@
-const { Client, GatewayIntentBits, REST, Routes, Events, ActivityType } = require("discord.js");
+const { Client, GatewayIntentBits, REST, Routes, Events, ActivityType, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const config = require("./config");
-const { commands, handleCommand } = require("./commands");
+const { commands, handleCommand, handleButton } = require("./commands");
 const { startDashboard } = require("./dashboard");
 const { log } = require("./logger");
-const { db } = require("./db");
+const { db, addXp } = require("./db");
 const { reconnectAll247Voice } = require("./voice");
 
 // Validate environment variables on startup
@@ -19,9 +19,16 @@ if (missingConfig.length > 0) {
 }
 
 // Client intents: Guilds and GuildVoiceStates are standard and non-privileged.
-const intents = [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates];
+const intents = [
+  GatewayIntentBits.Guilds,
+  GatewayIntentBits.GuildVoiceStates,
+  GatewayIntentBits.GuildMessages
+];
 if (process.env.ENABLE_GUILD_MEMBERS_INTENT === "true") {
   intents.push(GatewayIntentBits.GuildMembers);
+}
+if (process.env.ENABLE_MESSAGE_CONTENT_INTENT === "true") {
+  intents.push(GatewayIntentBits.MessageContent);
 }
 
 const client = new Client({
@@ -110,25 +117,38 @@ client.on(Events.GuildCreate, async guild => {
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-  try {
-    await handleCommand(interaction, client, config);
-  } catch (error) {
-    console.error(`[Commands] Erreur commande /${interaction.commandName} :`, error);
-    const response = {
-      content: "❌ Une erreur inattendue est survenue lors de l'exécution de cette commande. Vérifiez les permissions du bot et réessayez.",
-      ephemeral: true
-    };
-    if (interaction.deferred || interaction.replied) {
-      await interaction.followUp(response).catch(() => {});
-    } else {
-      await interaction.reply(response).catch(() => {});
+  if (interaction.isChatInputCommand()) {
+    try {
+      await handleCommand(interaction, client, config);
+    } catch (error) {
+      console.error(`[Commands] Erreur commande /${interaction.commandName} :`, error);
+      const response = {
+        content: "❌ Une erreur inattendue est survenue lors de l'exécution de cette commande. Vérifiez les permissions du bot et réessayez.",
+        ephemeral: true
+      };
+      if (interaction.deferred || interaction.replied) {
+        await interaction.followUp(response).catch(() => {});
+      } else {
+        await interaction.reply(response).catch(() => {});
+      }
+      if (interaction.guild) {
+        await log(interaction.guild, "Erreur Commande", `/${interaction.commandName} par ${interaction.user.tag} : ${String(error.message || error)}`, 0xED4245, {
+          category: "bot",
+          userId: interaction.user.id
+        });
+      }
     }
-    if (interaction.guild) {
-      await log(interaction.guild, "Erreur Commande", `/${interaction.commandName} par ${interaction.user.tag} : ${String(error.message || error)}`, 0xED4245, {
-        category: "bot",
-        userId: interaction.user.id
-      });
+  } else if (interaction.isButton()) {
+    try {
+      await handleButton(interaction, client, config);
+    } catch (error) {
+      console.error(`[Button Error] ${interaction.customId} :`, error);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({
+          content: "❌ Une erreur est survenue lors de cette action. Vérifiez les permissions du bot.",
+          ephemeral: true
+        }).catch(() => {});
+      }
     }
   }
 });
@@ -145,6 +165,49 @@ client.on(Events.GuildMemberRemove, member => {
     category: "member",
     userId: member.id
   });
+});
+
+client.on(Events.MessageCreate, async message => {
+  if (!message.guild || message.author.bot) return;
+
+  // Leveling & XP Gain
+  try {
+    const xpGain = Math.floor(Math.random() * 11) + 15; // 15 to 25 XP
+    const res = addXp(message.author.id, xpGain, 60000); // 60s anti-spam cooldown
+    if (res && res.success && res.leveledUp) {
+      const levelChannel = message.guild.channels.cache.find(c =>
+        c.name.includes("level-chat") || c.name.includes("rank") || c.name.includes("général")
+      );
+      const targetChan = levelChannel || message.channel;
+
+      const levelEmbed = new EmbedBuilder()
+        .setColor(0x8B5CF6) // Electric Violet
+        .setTitle("⚡ LEVEL UP — NOVA PVP")
+        .setDescription(`Félicitations ${message.author} ! Tu passes **Niveau ${res.newLevel}** ! 🏆\nContinue de participer pour débloquer des récompenses exclusives. Tape \`/rewards-info\` pour voir tes privilèges.`)
+        .setFooter({ text: "NOVA PVP System • Système d'XP" })
+        .setTimestamp();
+
+      if (targetChan && targetChan.permissionsFor(message.guild.members.me)?.has(PermissionFlagsBits.SendMessages)) {
+        await targetChan.send({ embeds: [levelEmbed] }).catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.error("[XP Error]:", err.message);
+  }
+});
+
+client.on(Events.MessageUpdate, (oldMsg, newMsg) => {
+  if (oldMsg.guild && !oldMsg.author?.bot && oldMsg.content !== newMsg.content) {
+    const channelName = oldMsg.channel?.name ? `#${oldMsg.channel.name}` : "salon inconnu";
+    const authorTag = oldMsg.author?.tag || "Utilisateur inconnu";
+    const before = (oldMsg.content || "[Média ou non disponible]").slice(0, 200);
+    const after = (newMsg.content || "[Média ou non disponible]").slice(0, 200);
+
+    log(oldMsg.guild, "Message modifié", `Auteur : **${authorTag}**\nSalon : ${channelName}\n**Avant :** \`\`\`${before}\`\`\`\n**Après :** \`\`\`${after}\`\`\``, 0x06B6D4, {
+      category: "moderation",
+      userId: oldMsg.author?.id
+    });
+  }
 });
 
 client.on(Events.MessageDelete, message => {

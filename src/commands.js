@@ -1,5 +1,5 @@
 const {
-  SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle
+  SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder
 } = require("discord.js");
 const {
   ensureUser,
@@ -15,7 +15,13 @@ const {
   getOpenTicketForUser,
   setSetting,
   getSetting,
-  addModerationAction
+  addModerationAction,
+  addXp,
+  getXpForLevel,
+  getLevelFromXp,
+  getXpLeaderboard,
+  saveTicketTranscript,
+  getTicketTranscript
 } = require("./db");
 const { log } = require("./logger");
 const { enable247Voice, disable247Voice } = require("./voice");
@@ -77,7 +83,40 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("leaderboard")
-    .setDescription("Affiche le classement des membres les plus riches du serveur"),
+    .setDescription("Affiche le classement des membres (Niveaux & XP ou Économie)")
+    .addStringOption(o =>
+      o.setName("type")
+        .setDescription("Catégorie du classement (par défaut: Niveaux & XP)")
+        .setRequired(false)
+        .addChoices(
+          { name: "🏆 Niveaux & XP (Compétitif)", value: "xp" },
+          { name: "💰 Économie & Coins", value: "coins" }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("rank")
+    .setDescription("Consulte votre niveau d'XP et votre progression ou celui d'un autre membre")
+    .addUserOption(o => o.setName("membre").setDescription("Membre à consulter (laisser vide pour votre niveau)").setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName("rewards-info")
+    .setDescription("Affiche les paliers de récompenses et privilèges de niveaux NOVA PVP"),
+
+  new SlashCommandBuilder()
+    .setName("ticket-panel")
+    .setDescription("Déploie le panneau officiel d'ouverture de tickets dans ce salon")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("roles-panel")
+    .setDescription("Déploie le sélecteur interactif de plateformes et rôles dans ce salon")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("setup-nova")
+    .setDescription("Initialise l'architecture complète, salons et rôles du serveur NOVA PVP sans rien supprimer")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   new SlashCommandBuilder()
     .setName("mod-ban")
@@ -186,27 +225,27 @@ async function handleCommand(interaction, client, config) {
       .setDescription("Voici la liste complète des commandes disponibles sur ce serveur :")
       .addFields(
         {
-          name: "🎫 Tickets",
-          value: "• `/ticket` : Ouvre un salon de support privé avec l'équipe\n• `/ticket-close [raison]` : Ferme et archive le ticket actuel"
+          name: "⚡ Niveaux & Compétition",
+          value: "• `/rank [membre]` : Consulte votre carte de joueur et niveau d'XP\n• `/leaderboard [type]` : Affiche le top joueurs (Niveaux ou Coins)\n• `/rewards-info` : Paliers de récompenses et privilèges exclusifs"
         },
         {
-          name: "💰 Économie",
-          value: "• `/balance [membre]` : Affiche le solde de coins\n• `/daily` : Récupère la récompense quotidienne (100 coins)\n• `/pay <membre> <montant>` : Transfère des coins à un autre membre\n• `/leaderboard` : Affiche le top 10 des membres les plus riches"
+          name: "🎫 Tickets & Support",
+          value: "• `/ticket` : Ouvre un salon de support privé avec l'équipe\n• `/ticket-close [raison]` : Ferme et archive le ticket actuel\n• `/ticket-panel` : *(Admin)* Déploie le panneau interactif de tickets"
         },
         {
-          name: "🎁 Codes Redeem",
-          value: "• `/redeem <code>` : Utilise un code pour recevoir des coins\n• `/redeem-create <code> <montant>` : *(Admin)* Crée un code à usage unique"
+          name: "💰 Économie & Codes",
+          value: "• `/balance [membre]` : Affiche le solde de coins\n• `/daily` : Récupère la récompense quotidienne (100 coins)\n• `/pay <membre> <montant>` : Transfère des coins à un autre membre\n• `/redeem <code>` : Utilise un code pour recevoir des coins\n• `/redeem-create <code> <montant>` : *(Admin)* Crée un code promo"
         },
         {
-          name: "⚖️ Modération",
-          value: "• `/mod-ban <membre> [raison]` : Bannit un membre du serveur\n• `/mod-kick <membre> [raison]` : Expulse un membre du serveur\n• `/mod-timeout <membre> <minutes> [raison]` : Exclut temporairement un membre\n• `/purge <nombre>` : Supprime jusqu'à 100 messages récents\n• `/clean [forcer]` : Vide entièrement ce salon textuel (recréation propre)"
+          name: "⚖️ Modération & Salons",
+          value: "• `/clean [forcer]` : Vide entièrement un salon textuel (recréation propre)\n• `/purge <nombre>` : Supprime jusqu'à 100 messages récents\n• `/mod-ban <membre>` : Bannit un membre du serveur\n• `/mod-kick <membre>` : Expulse un membre du serveur\n• `/mod-timeout <membre>` : Exclut temporairement un membre"
         },
         {
           name: "⚙️ Système & Administration",
-          value: "• `/setup-logs <salon>` : *(Admin)* Configure le salon des logs\n• `/dashboard` : Affiche l'URL du tableau de bord web\n• `/ping` : Affiche la latence du bot et de l'API"
+          value: "• `/setup-nova` : *(Admin)* Configure l'architecture serveur complète\n• `/roles-panel` : *(Admin)* Déploie le sélecteur de rôles\n• `/voice-24-7` : *(Admin)* Maintient le bot connecté en vocal\n• `/setup-logs <salon>` : *(Admin)* Configure le salon d'audit\n• `/dashboard` : Tableau de bord web\n• `/ping` : Latence du bot"
         }
       )
-      .setFooter({ text: "Bot Tout-en-Un • Système sécurisé" })
+      .setFooter({ text: "NOVA PVP System • Sécurité & Compétition" })
       .setTimestamp();
 
     return interaction.reply({ embeds: [embed], ephemeral: true });
@@ -502,27 +541,360 @@ async function handleCommand(interaction, client, config) {
 
   // --- /leaderboard ---
   if (name === "leaderboard") {
-    const top = getLeaderboard(10);
+    const lbType = interaction.options.getString("type") || "xp";
     const medals = ["🥇", "🥈", "🥉"];
 
-    let description = "";
-    if (!top || top.length === 0) {
-      description = "Aucun membre n'a encore de coins enregistrés.";
+    if (lbType === "coins") {
+      const top = getLeaderboard(10);
+      let description = "";
+      if (!top || top.length === 0) {
+        description = "Aucun membre n'a encore de coins enregistrés.";
+      } else {
+        description = top.map((entry, index) => {
+          const medal = medals[index] || `**#${index + 1}**`;
+          return `${medal} <@${entry.user_id}> — **${entry.balance.toLocaleString("fr-FR")} coins**`;
+        }).join("\n\n");
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0xFEE75C)
+        .setTitle("🏆 Classement Économie — Top 10")
+        .setDescription(description)
+        .setFooter({ text: "NOVA PVP System • Classement Mondial" })
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed] });
     } else {
-      description = top.map((entry, index) => {
-        const medal = medals[index] || `**#${index + 1}**`;
-        return `${medal} <@${entry.user_id}> — **${entry.balance.toLocaleString("fr-FR")} coins**`;
-      }).join("\n\n");
+      const topXp = getXpLeaderboard(10);
+      let description = "";
+      if (!topXp || topXp.length === 0) {
+        description = "Aucun joueur n'a encore accumulé d'XP. Envoyez des messages dans les salons textuels pour commencer !";
+      } else {
+        description = topXp.map((entry, index) => {
+          const medal = medals[index] || `**#${index + 1}**`;
+          return `${medal} <@${entry.user_id}> — **Niveau ${entry.level}** (${entry.xp.toLocaleString("fr-FR")} XP)`;
+        }).join("\n\n");
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0x8B5CF6) // Electric Violet
+        .setTitle("⚡ Classement Compétitif Niveaux & XP — Top 10")
+        .setDescription(description)
+        .setFooter({ text: "NOVA PVP System • Esport Leaderboard" })
+        .setTimestamp();
+
+      return interaction.reply({ embeds: [embed] });
     }
+  }
+
+  // --- /rank ---
+  if (name === "rank") {
+    const targetUser = interaction.options.getUser("membre") || interaction.user;
+    const user = getUser(targetUser.id);
+    const xp = user.xp || 0;
+    const level = user.level || 0;
+    const currentBaseXp = getXpForLevel(level);
+    const nextLevelXp = getXpForLevel(level + 1);
+    const needed = nextLevelXp - currentBaseXp;
+    const currentProgress = Math.max(0, xp - currentBaseXp);
+    const percent = Math.min(100, Math.max(0, Math.floor((currentProgress / (needed || 1)) * 100)));
+
+    const filledCount = Math.min(10, Math.max(0, Math.round((percent / 100) * 10)));
+    const emptyCount = 10 - filledCount;
+    const progressBar = "▰".repeat(filledCount) + "▱".repeat(emptyCount);
 
     const embed = new EmbedBuilder()
-      .setColor(0xFEE75C)
-      .setTitle("🏆 Classement Économie — Top 10")
-      .setDescription(description)
-      .setFooter({ text: "Bot Tout-en-Un • Classement mondial du serveur" })
+      .setColor(0x8B5CF6) // Electric Violet
+      .setTitle(`⚡ CARTE DE JOUEUR — NOVA PVP`)
+      .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
+      .addFields(
+        { name: "👤 Joueur", value: `${targetUser}`, inline: true },
+        { name: "🏆 Niveau Actuel", value: `**Niveau ${level}**`, inline: true },
+        { name: "💰 Solde Coins", value: `**${(user.balance || 0).toLocaleString("fr-FR")}** coins`, inline: true },
+        { name: "⚡ XP Total", value: `**${xp.toLocaleString("fr-FR")} XP**`, inline: true },
+        { name: "🎯 Prochain Niveau", value: `**${nextLevelXp.toLocaleString("fr-FR")} XP** *(+${Math.max(0, needed - currentProgress)} requis)*`, inline: true },
+        { name: `📊 Progression (${percent}%)`, value: `\`${progressBar}\` (${currentProgress} / ${needed} XP)` }
+      )
+      .setFooter({ text: "NOVA PVP System • Profil Compétitif" })
       .setTimestamp();
 
     return interaction.reply({ embeds: [embed] });
+  }
+
+  // --- /rewards-info ---
+  if (name === "rewards-info") {
+    const embed = new EmbedBuilder()
+      .setColor(0x06B6D4) // Cyan
+      .setTitle("🏆 PALIERS DE NIVEAUX & RÉCOMPENSES — NOVA PVP")
+      .setDescription(
+        "Gagnez de l'XP en participant activement aux discussions dans les salons textuels (15 à 25 XP par message avec cooldown anti-spam).\n\n" +
+        "### 🌟 Paliers de Prestige Esports\n" +
+        "• **Niveau 5 — Challenger :** Rôle cosmétique, accès aux réactions externes et permissions médias.\n" +
+        "• **Niveau 10 — PVP Member :** Accès débloqué aux salons de tournois et recherche d'équipe compétitive.\n" +
+        "• **Niveau 20 — VIP :** Rôle VIP, salons vocaux réservés, bonus de coins quotidiens augmentés.\n" +
+        "• **Niveau 30 — Master :** Accès prioritaire au matchmaking et aux salons privés.\n" +
+        "• **Niveau 50 — PVP Champion :** Rôle suprême de champion, salon d'élite et badge exclusif sur le serveur.\n\n" +
+        "### 💰 Économie & Codes Promo\n" +
+        "• `/daily` : Récupérez 100 coins toutes les 24h.\n" +
+        "• `/pay <membre> <montant>` : Transférez des coins à vos coéquipiers.\n" +
+        "• `/redeem <code>` : Échangez les codes promos distribués lors des événements."
+      )
+      .setFooter({ text: "NOVA PVP System • Competitive Rewards" })
+      .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  // --- /ticket-panel ---
+  if (name === "ticket-panel") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+
+    const openBtn = new ButtonBuilder()
+      .setCustomId("ticket_create")
+      .setLabel("Ouvrir un ticket")
+      .setEmoji("🎟️")
+      .setStyle(ButtonStyle.Primary);
+
+    const row = new ActionRowBuilder().addComponents(openBtn);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x8B5CF6) // Electric Violet
+      .setTitle("🎫 CENTRE D'ASSISTANCE & TICKETS — NOVA PVP")
+      .setDescription(
+        "Besoin d'une assistance privée, d'un signalement joueur ou d'une question sur un tournoi ?\n\n" +
+        "Cliquez sur le bouton ci-dessous pour ouvrir un salon privé sécurisé avec l'équipe du staff.\n\n" +
+        "• **Support 7j/7 dédié à la communauté**\n" +
+        "• **Confidentialité totale des échanges**\n" +
+        "• **Archivage automatique et transcript sécurisé**\n\n" +
+        "*(Un seul ticket ouvert à la fois par membre)*"
+      )
+      .setFooter({ text: "NOVA PVP System • Support Sécurisé" })
+      .setTimestamp();
+
+    await interaction.channel.send({ embeds: [embed], components: [row] });
+    return interaction.reply({ content: "✅ Panneau de tickets déployé avec succès !", ephemeral: true });
+  }
+
+  // --- /roles-panel ---
+  if (name === "roles-panel") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+
+    const platformRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("role_toggle_pc").setLabel("PC").setEmoji("🖥️").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("role_toggle_playstation").setLabel("PlayStation").setEmoji("🎮").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("role_toggle_xbox").setLabel("Xbox").setEmoji("🟢").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("role_toggle_switch").setLabel("Switch").setEmoji("🔴").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("role_toggle_mobile").setLabel("Mobile").setEmoji("📱").setStyle(ButtonStyle.Secondary)
+    );
+
+    const notifRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("role_toggle_annonces").setLabel("Annonces").setEmoji("📢").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("role_toggle_tournois").setLabel("Tournois").setEmoji("⚔️").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("role_toggle_giveaways").setLabel("Giveaways").setEmoji("🎁").setStyle(ButtonStyle.Primary)
+    );
+
+    const embed = new EmbedBuilder()
+      .setColor(0x06B6D4) // Cyan
+      .setTitle("🎭 SÉLECTION DES RÔLES & NOTIFICATIONS — NOVA PVP")
+      .setDescription(
+        "Personnalisez votre profil et choisissez vos alertes en cliquant sur les boutons ci-dessous.\n*Cliquez à nouveau pour retirer un rôle.*\n\n" +
+        "**🎮 Plateformes de Jeu :**\n" +
+        "Attribuez-vous vos plateformes pour trouver facilement vos coéquipiers dans **#🤝・find-a-team**.\n\n" +
+        "**🔔 Alertes & Notifications :**\n" +
+        "Recevez les mentions pour les annonces importantes, tournois esport et concours."
+      )
+      .setFooter({ text: "NOVA PVP System • Rôles Interactifs" })
+      .setTimestamp();
+
+    await interaction.channel.send({ embeds: [embed], components: [platformRow, notifRow] });
+    return interaction.reply({ content: "✅ Panneau de rôles déployé avec succès !", ephemeral: true });
+  }
+
+  // --- /setup-nova ---
+  if (name === "setup-nova") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      let staffRole = guild.roles.cache.find(r => r.name.toLowerCase() === "staff" || r.name.toLowerCase().includes("staff"));
+      if (!staffRole) {
+        staffRole = await guild.roles.create({
+          name: "🛡️ Staff",
+          color: 0x8B5CF6,
+          permissions: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ManageMessages,
+            PermissionFlagsBits.KickMembers,
+            PermissionFlagsBits.ModerateMembers
+          ],
+          reason: "Création automatique du rôle Staff NOVA PVP"
+        });
+      }
+
+      const BLUEPRINT = [
+        {
+          name: "✦・START HERE",
+          channels: [
+            { name: "👋・welcome", type: ChannelType.GuildText, readonly: true },
+            { name: "📢・announcements", type: ChannelType.GuildText, readonly: true },
+            { name: "📜・server-rules", type: ChannelType.GuildText, readonly: true },
+            { name: "🎭・get-roles", type: ChannelType.GuildText, readonly: true },
+            { name: "📌・server-info", type: ChannelType.GuildText, readonly: true }
+          ]
+        },
+        {
+          name: "⚡・NOVA COMMUNITY",
+          channels: [
+            { name: "💬・general-chat", type: ChannelType.GuildText },
+            { name: "🎮・gaming-hub", type: ChannelType.GuildText },
+            { name: "🤝・find-a-team", type: ChannelType.GuildText },
+            { name: "📸・media-zone", type: ChannelType.GuildText },
+            { name: "😂・memes", type: ChannelType.GuildText },
+            { name: "💡・suggestions", type: ChannelType.GuildText }
+          ]
+        },
+        {
+          name: "⚔️・PVP ARENA",
+          channels: [
+            { name: "⚔️・pvp-chat", type: ChannelType.GuildText },
+            { name: "🔎・team-recruitment", type: ChannelType.GuildText },
+            { name: "🎯・matchmaking", type: ChannelType.GuildText },
+            { name: "🏆・tournament-info", type: ChannelType.GuildText, readonly: true },
+            { name: "📊・leaderboard", type: ChannelType.GuildText, readonly: true },
+            { name: "🎬・kill-clips", type: ChannelType.GuildText }
+          ]
+        },
+        {
+          name: "🎫・SUPPORT CENTER",
+          channels: [
+            { name: "🎟️・create-ticket", type: ChannelType.GuildText, readonly: true },
+            { name: "📨・ticket-transcripts", type: ChannelType.GuildText, private: true }
+          ]
+        },
+        {
+          name: "🔊・VOICE LOUNGE",
+          channels: [
+            { name: "🔊・NOVA LOBBY", type: ChannelType.GuildVoice },
+            { name: "🎮・SQUAD 01", type: ChannelType.GuildVoice },
+            { name: "🎮・SQUAD 02", type: ChannelType.GuildVoice },
+            { name: "⚔️・PVP TEAM", type: ChannelType.GuildVoice },
+            { name: "🔒・PRIVATE SQUAD", type: ChannelType.GuildVoice, limit: 4 }
+          ]
+        },
+        {
+          name: "⭐・LEVELS & REWARDS",
+          channels: [
+            { name: "📈・level-rankings", type: ChannelType.GuildText, readonly: true },
+            { name: "🎁・rewards-info", type: ChannelType.GuildText, readonly: true },
+            { name: "💬・level-chat", type: ChannelType.GuildText }
+          ]
+        },
+        {
+          name: "🛡️・STAFF HQ",
+          private: true,
+          channels: [
+            { name: "🔐・staff-chat", type: ChannelType.GuildText },
+            { name: "🚨・player-reports", type: ChannelType.GuildText },
+            { name: "📋・mod-logs", type: ChannelType.GuildText },
+            { name: "🤖・bot-logs", type: ChannelType.GuildText },
+            { name: "🎫・ticket-control", type: ChannelType.GuildText },
+            { name: "📝・staff-notes", type: ChannelType.GuildText }
+          ]
+        }
+      ];
+
+      let supportCategory = null;
+      let botLogsChannel = null;
+      let novaLobbyChannel = null;
+
+      for (const catDef of BLUEPRINT) {
+        let category = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === catDef.name.toLowerCase());
+        if (!category) {
+          const overwrites = [];
+          if (catDef.private) {
+            overwrites.push(
+              { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+              { id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+              { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] }
+            );
+          }
+          category = await guild.channels.create({
+            name: catDef.name,
+            type: ChannelType.GuildCategory,
+            permissionOverwrites: overwrites.length ? overwrites : undefined
+          });
+        }
+
+        if (catDef.name.includes("SUPPORT")) supportCategory = category;
+
+        for (const chanDef of catDef.channels) {
+          let channel = guild.channels.cache.find(c =>
+            c.parentId === category.id && (c.name.toLowerCase() === chanDef.name.toLowerCase() || c.name.includes(chanDef.name.replace(/^[^\w\s]+・/, "")))
+          );
+
+          if (!channel) {
+            const overwrites = [];
+            if (chanDef.readonly) {
+              overwrites.push({
+                id: guild.roles.everyone.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+                deny: [PermissionFlagsBits.SendMessages]
+              });
+            }
+            if (chanDef.private) {
+              overwrites.push(
+                { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+                { id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+                { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] }
+              );
+            }
+
+            channel = await guild.channels.create({
+              name: chanDef.name,
+              type: chanDef.type,
+              parent: category.id,
+              userLimit: chanDef.limit || undefined,
+              permissionOverwrites: overwrites.length ? overwrites : undefined
+            });
+          }
+
+          if (chanDef.name.includes("bot-logs") || chanDef.name.includes("mod-logs")) botLogsChannel = channel;
+          if (chanDef.name.includes("NOVA LOBBY")) novaLobbyChannel = channel;
+        }
+      }
+
+      if (botLogsChannel) setSetting(`logs:${guild.id}`, botLogsChannel.id);
+      if (supportCategory) setSetting(`ticket_category:${guild.id}`, supportCategory.id);
+      if (novaLobbyChannel) {
+        setSetting(`voice_channel:${guild.id}`, novaLobbyChannel.id);
+        enable247Voice(guild, novaLobbyChannel.id).catch(() => {});
+      }
+
+      const successEmbed = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle("⚡ Architecture NOVA PVP Déployée avec Succès !")
+        .setDescription(
+          `Toutes les catégories et salons esport ont été créés et organisés conformément au blueprint sans supprimer vos salons existants !\n\n` +
+          `• **Salons & Catégories configurés :** 7 catégories officielles\n` +
+          `• **Support & Tickets :** Catégorie configurée\n` +
+          `• **Mode Vocal 24/7 :** Relié à **#🔊・NOVA LOBBY**\n` +
+          `• **Logs configurés :** Enregistrés dans la base SQLite\n\n` +
+          `*Vous pouvez déployer les panneaux interactifs dans leurs salons respectifs avec \`/ticket-panel\` et \`/roles-panel\`.*`
+        )
+        .setFooter({ text: "NOVA PVP System • Architecture Officielle" })
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [successEmbed] });
+
+      return log(guild, "Architecture NOVA PVP Déployée", `Déploiement complet de l'architecture serveur exécuté par ${interaction.user.tag}`, 0x8B5CF6, {
+        category: "config",
+        userId: interaction.user.id
+      });
+    } catch (err) {
+      console.error("Erreur setup-nova:", err);
+      return interaction.editReply({ content: `❌ Erreur lors du déploiement : ${err.message}` });
+    }
   }
 
   // --- /mod-ban ---
@@ -1124,4 +1496,282 @@ async function handleCommand(interaction, client, config) {
   }
 }
 
-module.exports = { commands, handleCommand, checkRoleHierarchy };
+async function handleButton(interaction, client, config) {
+  const customId = interaction.customId;
+  const guild = interaction.guild;
+  if (!guild) return;
+
+  // 1. Ticket Creation via button
+  if (customId === "ticket_create") {
+    const existing = getOpenTicketForUser(guild.id, interaction.user.id);
+    if (existing) {
+      return interaction.reply({
+        content: `❌ Vous avez déjà un ticket ouvert actuellement : <#${existing.channel_id}>. Veuillez le fermer avant d'en ouvrir un nouveau.`,
+        ephemeral: true
+      });
+    }
+
+    const safeName = interaction.user.username.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 15) || "joueur";
+    const staffRole = guild.roles.cache.find(r =>
+      r.name.toLowerCase().includes("support") ||
+      r.name.toLowerCase().includes("staff") ||
+      r.name.toLowerCase().includes("moderator") ||
+      r.name.toLowerCase().includes("admin")
+    );
+
+    const overwrites = [
+      { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+      {
+        id: interaction.user.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.AttachFiles,
+          PermissionFlagsBits.EmbedLinks
+        ]
+      },
+      {
+        id: client.user.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory,
+          PermissionFlagsBits.ManageChannels
+        ]
+      }
+    ];
+
+    if (staffRole) {
+      overwrites.push({
+        id: staffRole.id,
+        allow: [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+          PermissionFlagsBits.ReadMessageHistory
+        ]
+      });
+    }
+
+    const categoryId = getSetting(`ticket_category:${guild.id}`) || config.ticketCategoryId;
+    const parentCategory = categoryId && guild.channels.cache.has(categoryId)
+      ? categoryId
+      : guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && (c.name.includes("SUPPORT") || c.name.includes("TICKET")))?.id;
+
+    let ticketChan;
+    try {
+      ticketChan = await guild.channels.create({
+        name: `ticket-${safeName}`,
+        type: ChannelType.GuildText,
+        parent: parentCategory,
+        permissionOverwrites: overwrites,
+        topic: `Ticket PVP ouvert par ${interaction.user.tag} (${interaction.user.id})`
+      });
+    } catch (err) {
+      console.error("Erreur création salon ticket:", err);
+      return interaction.reply({
+        content: "❌ Impossible de créer le ticket. Vérifiez que le bot a bien la permission `Gérer les salons`.",
+        ephemeral: true
+      });
+    }
+
+    createTicket(ticketChan.id, guild.id, interaction.user.id);
+
+    const closeBtn = new ButtonBuilder()
+      .setCustomId("ticket_close_request")
+      .setLabel("Fermer le ticket")
+      .setEmoji("🔒")
+      .setStyle(ButtonStyle.Danger);
+    const row = new ActionRowBuilder().addComponents(closeBtn);
+
+    const welcomeEmbed = new EmbedBuilder()
+      .setColor(0x8B5CF6) // Electric Violet
+      .setTitle("🎫 Assistance NOVA PVP — Ticket Ouvert")
+      .setDescription(
+        `Bonjour ${interaction.user} !\n\n` +
+        `Bienvenue dans votre espace d'assistance privé. L'équipe du staff a été notifiée et prendra en charge votre demande dans les plus brefs délais.\n\n` +
+        `• **Veuillez décrire précisément votre question ou problème ci-dessous.**\n` +
+        `• *Pour fermer ce ticket, cliquez sur le bouton ci-dessous ou tapez \`/ticket-close\`.*`
+      )
+      .setFooter({ text: "NOVA PVP System • Support Sécurisé" })
+      .setTimestamp();
+
+    await ticketChan.send({
+      content: `${interaction.user}${staffRole ? ` | ${staffRole}` : ""}`,
+      embeds: [welcomeEmbed],
+      components: [row]
+    }).catch(() => {});
+
+    await interaction.reply({
+      content: `✅ Votre ticket a été créé avec succès : ${ticketChan}`,
+      ephemeral: true
+    });
+
+    return log(guild, "Ticket Ouvert", `Nouveau ticket ${ticketChan} créé par ${interaction.user.tag} (${interaction.user.id})`, 0x57F287, {
+      category: "ticket",
+      userId: interaction.user.id
+    });
+  }
+
+  // 2. Ticket Close Request
+  if (customId === "ticket_close_request") {
+    const ticket = getTicketByChannel(interaction.channelId);
+    if (!ticket || ticket.status !== "open") {
+      return interaction.reply({ content: "❌ Ce salon n'est pas un ticket actif.", ephemeral: true });
+    }
+
+    const isOwner = ticket.user_id === interaction.user.id;
+    const canManage = interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels) ||
+                      interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages);
+    if (!isOwner && !canManage) {
+      return interaction.reply({ content: "❌ Seul le créateur du ticket ou un membre du staff peut fermer ce ticket.", ephemeral: true });
+    }
+
+    const confirmBtn = new ButtonBuilder()
+      .setCustomId("ticket_close_confirm")
+      .setLabel("Confirmer la fermeture")
+      .setEmoji("⚠️")
+      .setStyle(ButtonStyle.Danger);
+
+    const cancelBtn = new ButtonBuilder()
+      .setCustomId("ticket_close_cancel")
+      .setLabel("Annuler")
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Secondary);
+
+    const row = new ActionRowBuilder().addComponents(confirmBtn, cancelBtn);
+
+    return interaction.reply({
+      content: "⚠️ **Êtes-vous sûr de vouloir fermer et archiver ce ticket ?** Un transcript officiel sera généré avant la suppression.",
+      components: [row]
+    });
+  }
+
+  // 3. Ticket Close Cancel
+  if (customId === "ticket_close_cancel") {
+    return interaction.update({
+      content: "❌ Fermeture du ticket annulée.",
+      components: []
+    });
+  }
+
+  // 4. Ticket Close Confirm (with transcript export)
+  if (customId === "ticket_close_confirm") {
+    await interaction.update({
+      content: "⏳ Génération du transcript et archivage du ticket en cours...",
+      components: []
+    });
+
+    const channel = interaction.channel;
+    let transcriptText = `==============================================================\n`;
+    transcriptText += `TRANSCRIPT OFFICIEL TICKET — NOVA PVP\n`;
+    transcriptText += `Salon : #${channel.name} (${channel.id})\n`;
+    transcriptText += `Date : ${new Date().toLocaleString("fr-FR")}\n`;
+    transcriptText += `Fermé par : ${interaction.user.tag} (${interaction.user.id})\n`;
+    transcriptText += `==============================================================\n\n`;
+
+    try {
+      const messages = await channel.messages.fetch({ limit: 100 });
+      const sorted = Array.from(messages.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+      for (const msg of sorted) {
+        const time = new Date(msg.createdTimestamp).toLocaleString("fr-FR");
+        transcriptText += `[${time}] ${msg.author.tag} : ${msg.content || "[Média ou Embed]"}\n`;
+      }
+    } catch (e) {
+      transcriptText += `[Note récupération messages : ${e.message}]\n`;
+    }
+
+    saveTicketTranscript(channel.id, guild.id, interaction.user.id, interaction.user.tag, transcriptText);
+    closeTicket(channel.id, interaction.user.id, "Fermeture via panneau interactif");
+
+    const transcriptChan = guild.channels.cache.find(c =>
+      c.name.includes("transcript") || c.name.includes("mod-logs") || c.name.includes("bot-logs")
+    );
+
+    if (transcriptChan && transcriptChan.isTextBased()) {
+      const transcriptEmbed = new EmbedBuilder()
+        .setColor(0x06B6D4) // Cyan
+        .setTitle("📨 Archive de Ticket — Transcript Officiel")
+        .addFields(
+          { name: "Salon", value: `#${channel.name}`, inline: true },
+          { name: "Fermé par", value: `${interaction.user.tag}`, inline: true },
+          { name: "Date", value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }
+        )
+        .setFooter({ text: "NOVA PVP System • Archives Transcripts" })
+        .setTimestamp();
+
+      const attachment = new AttachmentBuilder(Buffer.from(transcriptText, "utf-8"), {
+        name: `transcript-${channel.name}.txt`
+      });
+
+      await transcriptChan.send({ embeds: [transcriptEmbed], files: [attachment] }).catch(() => {});
+    }
+
+    await channel.send("🔒 **Ticket archivé avec succès.** Ce salon sera supprimé dans 5 secondes...");
+    setTimeout(async () => {
+      try {
+        await channel.delete(`Ticket fermé par ${interaction.user.tag}`);
+      } catch {}
+    }, 5000);
+
+    return log(guild, "Ticket Fermé", `Ticket #${channel.name} fermé et archivé par ${interaction.user.tag}`, 0xED4245, {
+      category: "ticket",
+      userId: interaction.user.id
+    });
+  }
+
+  // 5. Role Toggles (Platforms & Notifications)
+  if (customId.startsWith("role_toggle_")) {
+    const roleKey = customId.replace("role_toggle_", "").toLowerCase();
+    const roleMapping = {
+      pc: "PC",
+      playstation: "Playstation",
+      xbox: "XBOX",
+      switch: "Switch",
+      mobile: "Mobile",
+      annonces: "📢 Annonces",
+      tournois: "⚔️ Tournois",
+      giveaways: "🎁 Giveaways"
+    };
+
+    const targetRoleName = roleMapping[roleKey] || roleKey;
+    let targetRole = guild.roles.cache.find(r => r.name.toLowerCase() === targetRoleName.toLowerCase() || r.name.toLowerCase().includes(roleKey));
+
+    if (!targetRole && (roleKey.startsWith("annonces") || roleKey.startsWith("tournois") || roleKey.startsWith("giveaways"))) {
+      try {
+        targetRole = await guild.roles.create({
+          name: targetRoleName,
+          color: 0x8B5CF6,
+          reason: "Création automatique du rôle de notification NOVA PVP"
+        });
+      } catch {}
+    }
+
+    if (!targetRole) {
+      return interaction.reply({
+        content: `❌ Le rôle **${targetRoleName}** n'existe pas encore sur ce serveur.`,
+        ephemeral: true
+      });
+    }
+
+    const member = interaction.member;
+    const hasRole = member.roles.cache.has(targetRole.id);
+
+    try {
+      if (hasRole) {
+        await member.roles.remove(targetRole);
+        return interaction.reply({ content: `❌ Rôle **${targetRole.name}** retiré !`, ephemeral: true });
+      } else {
+        await member.roles.add(targetRole);
+        return interaction.reply({ content: `✅ Rôle **${targetRole.name}** ajouté avec succès !`, ephemeral: true });
+      }
+    } catch (err) {
+      return interaction.reply({
+        content: `⚠️ Impossible de modifier ce rôle : vérifiez que le rôle du bot (\`${client.user.username}\`) est positionné **au-dessus** du rôle **${targetRole.name}** dans les paramètres du serveur.`,
+        ephemeral: true
+      });
+    }
+  }
+}
+
+module.exports = { commands, handleCommand, handleButton, checkRoleHierarchy };

@@ -2,12 +2,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { commands, checkRoleHierarchy } = require("../src/commands");
 
-test("Commands: all 17 required commands are defined", () => {
+test("Commands: all 22 required commands are defined", () => {
   const expected = [
     "help", "ping", "dashboard", "ticket", "ticket-close",
     "setup-logs", "redeem-create", "redeem", "balance",
     "daily", "pay", "leaderboard", "mod-ban", "mod-kick",
-    "mod-timeout", "purge", "clean"
+    "mod-timeout", "purge", "clean", "rank", "rewards-info",
+    "ticket-panel", "roles-panel", "setup-nova"
   ];
 
   const actualNames = commands.map(c => c.name);
@@ -16,11 +17,22 @@ test("Commands: all 17 required commands are defined", () => {
   }
 });
 
-test("Commands: /clean command is properly configured", () => {
+test("Commands: NOVA PVP commands are properly configured", () => {
   const cleanCmd = commands.find(c => c.name === "clean");
   assert.ok(cleanCmd, "La commande /clean doit exister");
-  assert.equal(typeof cleanCmd.description, "string");
   assert.ok(cleanCmd.options.some(o => o.name === "forcer"), "L'option 'forcer' doit exister sur /clean");
+
+  const rankCmd = commands.find(c => c.name === "rank");
+  assert.ok(rankCmd, "La commande /rank doit exister");
+
+  const ticketPanelCmd = commands.find(c => c.name === "ticket-panel");
+  assert.ok(ticketPanelCmd, "La commande /ticket-panel doit exister");
+
+  const rolesPanelCmd = commands.find(c => c.name === "roles-panel");
+  assert.ok(rolesPanelCmd, "La commande /roles-panel doit exister");
+
+  const setupNovaCmd = commands.find(c => c.name === "setup-nova");
+  assert.ok(setupNovaCmd, "La commande /setup-nova doit exister");
 });
 
 test("Commands: checkRoleHierarchy blocks self-moderation", () => {
