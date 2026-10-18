@@ -207,6 +207,14 @@ client.on(Events.GuildMemberAdd, async member => {
         embeds: [welcomeEmbed],
         files
       }).catch(err => console.error("[Welcome Send Error]:", err.message));
+
+      // 4. Send private DM welcome directly to the new member
+      try {
+        await member.send({
+          content: `Marhba bik ${member} f **NOVA PVP** ! 🏆\nTu es notre **${member.guild.memberCount}ème combattant**.\n\nPrépare ton stuff et rejoins l'arène !\n📜・Règles : <#1561442792729739385>\n🎭・Rôles : <#1558904477996548120>\n💬・Général : <#1561442800455647322>\n⚔️・PVP Arena : <#1561442812216615052>`,
+          embeds: [welcomeEmbed]
+        }).catch(() => {});
+      } catch {}
     }
   } catch (err) {
     console.error("[Welcome Notification Error]:", err.message);
