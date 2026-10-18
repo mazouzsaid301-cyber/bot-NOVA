@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  discord-bot:
+    build: .
+    container_name: mazoodev-discord-bot
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      # Volume persistant pour la base de données SQLite
+      - bot_data:/app/data
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  bot_data:
+    name: mazoodev_bot_sqlite_data
