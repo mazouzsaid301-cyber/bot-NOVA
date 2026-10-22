@@ -1,11 +1,12 @@
 const {
-  SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder
+  SlashCommandBuilder, PermissionFlagsBits, ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ModalBuilder, TextInputBuilder, TextInputStyle
 } = require("discord.js");
 const {
   ensureUser,
   getUser,
   getLeaderboard,
   transferCoins,
+  addCoins,
   claimDaily,
   createRedeemCode,
   claimRedeemCode,
@@ -25,6 +26,22 @@ const {
 } = require("./db");
 const { log } = require("./logger");
 const { enable247Voice, disable247Voice } = require("./voice");
+const { fetchFreeGames, fetchGamingNews, formatFreeGameEmbed, formatGamingNewsEmbed, checkAndPostGamingUpdates } = require("./gaming");
+const {
+  CURATED_PVP_SCRIPTS,
+  BRAZIL_PVP_CLOTHING_PACKS,
+  fetchCfxFreeReleases,
+  formatFivemScriptEmbed,
+  formatFivemClothingEmbed,
+  checkAndPostFivemScripts,
+  checkAndPostFivemClothing
+} = require("./fivemScripts");
+const {
+  CURATED_FIVEM_CITIZENS,
+  formatCitizenEmbed,
+  getOrCreateCitizensChannel,
+  checkAndPostFivemCitizens
+} = require("./fivemCitizens");
 const fs = require("fs");
 const path = require("path");
 
@@ -178,7 +195,232 @@ const commands = [
     .setName("test-welcome")
     .setDescription("Simule et affiche le message de bienvenue avec le GIF dans le salon welcome")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addUserOption(o => o.setName("membre").setDescription("Membre à tester (optionnel)"))
+    .addUserOption(o => o.setName("membre").setDescription("Membre à tester (optionnel)")),
+
+  new SlashCommandBuilder()
+    .setName("test-boost")
+    .setDescription("Simule et affiche la notification officielle de Nitro Boost dans le salon boosters")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addUserOption(o => o.setName("membre").setDescription("Membre à tester (laisser vide pour vous-même)")),
+
+  new SlashCommandBuilder()
+    .setName("emojis")
+    .setDescription("Affiche tous les émojis du serveur (fixes et animés) avec leurs codes pour les copier"),
+
+  new SlashCommandBuilder()
+    .setName("emoji-create")
+    .setDescription("Ajoute un nouvel émoji personnalisé (animé ou fixe) au serveur")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions)
+    .addStringOption(o =>
+      o.setName("nom")
+        .setDescription("Nom de l'émoji (sans espaces)")
+        .setMinLength(2)
+        .setMaxLength(32)
+        .setRequired(true)
+    )
+    .addStringOption(o =>
+      o.setName("lien")
+        .setDescription("Lien direct vers l'image ou GIF (PNG, JPG, GIF max 256 Ko)")
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("meme")
+    .setDescription("🎭 Publier un meme avec le design officiel NOVA PVP (image, vidéo, gif ou punchline)")
+    .addAttachmentOption(o =>
+      o.setName("fichier")
+        .setDescription("Image, GIF ou Vidéo à uploader (MP4, MOV, PNG, JPG, GIF)")
+        .setRequired(false)
+    )
+    .addStringOption(o =>
+      o.setName("lien")
+        .setDescription("Lien de l'image ou vidéo (YouTube, TikTok, Tenor, MP4, etc.)")
+        .setRequired(false)
+    )
+    .addStringOption(o =>
+      o.setName("titre")
+        .setDescription("Légende ou punchline drôle du meme (optionnel)")
+        .setMaxLength(256)
+        .setRequired(false)
+    )
+    .addChannelOption(o =>
+      o.setName("salon")
+        .setDescription("Salon où publier (par défaut: salon #memes)")
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("announce")
+    .setDescription("📢 Publier une annonce stylisée avec image, lien et texte via un formulaire popup")
+    .addChannelOption(o =>
+      o.setName("salon")
+        .setDescription("Salon où envoyer l'annonce (laisser vide pour le salon actuel)")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setRequired(false)
+    )
+    .addStringOption(o =>
+      o.setName("mention")
+        .setDescription("Notifier les membres avec une mention")
+        .setRequired(false)
+        .addChoices(
+          { name: "Aucune mention", value: "none" },
+          { name: "📢 @everyone (Tout le serveur)", value: "everyone" },
+          { name: "⚡ @here (Membres connectés)", value: "here" }
+        )
+    )
+    .addStringOption(o =>
+      o.setName("couleur")
+        .setDescription("Couleur du cadre de l'annonce")
+        .setRequired(false)
+        .addChoices(
+          { name: "⚡ Violet NOVA (Officiel)", value: "8B5CF6" },
+          { name: "🔵 Bleu Blurple", value: "5865F2" },
+          { name: "🟢 Vert Succès", value: "57F287" },
+          { name: "🔴 Rouge Alerte", value: "ED4245" },
+          { name: "🟡 Or / Prestige", value: "FEE75C" },
+          { name: "⚫ Noir / Dark", value: "2B2D31" },
+          { name: "💎 Cyan Électrique", value: "06B6D4" }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("annonce")
+    .setDescription("📢 Publier une annonce stylisée avec image, lien et texte via un formulaire popup")
+    .addChannelOption(o =>
+      o.setName("salon")
+        .setDescription("Salon où envoyer l'annonce (laisser vide pour le salon actuel)")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setRequired(false)
+    )
+    .addStringOption(o =>
+      o.setName("mention")
+        .setDescription("Notifier les membres avec une mention")
+        .setRequired(false)
+        .addChoices(
+          { name: "Aucune mention", value: "none" },
+          { name: "📢 @everyone (Tout le serveur)", value: "everyone" },
+          { name: "⚡ @here (Membres connectés)", value: "here" }
+        )
+    )
+    .addStringOption(o =>
+      o.setName("couleur")
+        .setDescription("Couleur du cadre de l'annonce")
+        .setRequired(false)
+        .addChoices(
+          { name: "⚡ Violet NOVA (Officiel)", value: "8B5CF6" },
+          { name: "🔵 Bleu Blurple", value: "5865F2" },
+          { name: "🟢 Vert Succès", value: "57F287" },
+          { name: "🔴 Rouge Alerte", value: "ED4245" },
+          { name: "🟡 Or / Prestige", value: "FEE75C" },
+          { name: "⚫ Noir / Dark", value: "2B2D31" },
+          { name: "💎 Cyan Électrique", value: "06B6D4" }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("free-games")
+    .setDescription("🎁 Afficher les jeux gratuits actuellement disponibles (Epic Games, Steam, PC)")
+    .addStringOption(o =>
+      o.setName("plateforme")
+        .setDescription("Filtrer par plateforme")
+        .setRequired(false)
+        .addChoices(
+          { name: "🌐 Toutes les plateformes (PC)", value: "pc" },
+          { name: "🟣 Epic Games Store", value: "epic-games-store" },
+          { name: "🟢 Steam", value: "steam" },
+          { name: "🔵 GOG / Sans DRM", value: "drm-free" }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("gaming-news")
+    .setDescription("⚡ Afficher les dernières actualités et annonces de jeux vidéo"),
+
+  new SlashCommandBuilder()
+    .setName("check-gaming")
+    .setDescription("🔄 Forcer la vérification et poster les nouveaux jeux gratuits dans #gaming-hub")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("fivem-scripts")
+    .setDescription("🛠️ Parcourir les scripts FiveM gratuits indispensables pour un serveur PvP")
+    .addStringOption(o =>
+      o.setName("categorie")
+        .setDescription("Filtrer par type de script")
+        .setRequired(false)
+        .addChoices(
+          { name: "🌟 Tous les scripts PvP essentiels", value: "all" },
+          { name: "⚔️ Armes, Combat & Durabilité", value: "weapons" },
+          { name: "🔴 Arènes RedZone & Matchmaking", value: "arenas" },
+          { name: "🎯 Hitmarkers & Crosshair", value: "crosshair" },
+          { name: "📊 HUD, KDR & Scoreboard", value: "hud" }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("check-scripts")
+    .setDescription("🔄 Forcer la vérification et poster les nouveaux scripts FiveM dans #fivem-scripts")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("pvp-clothing")
+    .setDescription("👕 Parcourir les packs de vêtements FiveM PvP Brasil (Roupas de Cria, Coletes, Juliet)"),
+
+  new SlashCommandBuilder()
+    .setName("check-clothing")
+    .setDescription("🔄 Forcer la vérification et poster les packs de vêtements dans #pvp-clothing")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("citizens")
+    .setDescription("🏙️ Parcourir les meilleurs Citizens FiveM PvP avec aperçu in-game et lien direct")
+    .addStringOption(o =>
+      o.setName("categorie")
+        .setDescription("Filtrer par style de Citizen")
+        .setRequired(false)
+        .addChoices(
+          { name: "🌟 Tous les Citizens", value: "all" },
+          { name: "⚡ FPS Boost Compétitif (Configs Faibles / 240Hz)", value: "fps" },
+          { name: "🌌 Ciel Galaxy & Nuit Sombre", value: "sky" },
+          { name: "🩸 Blood FX & Tracers Laser", value: "blood" },
+          { name: "✨ Réalisme, Eau Claire & NVR", value: "realism" },
+          { name: "🔫 Armes & Soundpack PvP", value: "audio" }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("check-citizens")
+    .setDescription("🔄 Forcer la vérification et poster les nouveaux Citizens FiveM dans le salon dédié")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("setup-citizens")
+    .setDescription("⚙️ Créer et configurer automatiquement le salon officiel #fivem-citizens")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("post-citizen")
+    .setDescription("📢 Publier manuellement un Citizen FiveM personnalisé avec aperçu in-game dans #fivem-citizens")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(o => o.setName("titre").setDescription("Titre du Citizen (ex: Citizen Galaxy Red PvP)").setRequired(true))
+    .addStringOption(o =>
+      o.setName("categorie")
+        .setDescription("Catégorie du Citizen")
+        .setRequired(true)
+        .addChoices(
+          { name: "⚡ FPS Boost Compétitif", value: "⚡ FPS Boost Compétitif" },
+          { name: "🌌 Ciel Galaxy & Nuit Sombre", value: "🌌 Ciel Galaxy & Nuit Sombre" },
+          { name: "🩸 Blood FX & Effets de Tir", value: "🩸 Blood FX & Effets de Tir" },
+          { name: "✨ Réalisme & Visibilité Pure", value: "✨ Réalisme & Visibilité Pure" },
+          { name: "🔫 Armes & Soundpack PvP", value: "🔫 Armes & Soundpack PvP" }
+        )
+    )
+    .addStringOption(o => o.setName("image").setDescription("Lien de l'image de rendu in-game (URL PNG/JPG/WebP)").setRequired(true))
+    .addStringOption(o => o.setName("lien").setDescription("Lien de téléchargement (Google Drive, MediaFire, GitHub...)").setRequired(true))
+    .addStringOption(o => o.setName("fps_boost").setDescription("Gain FPS estimé (ex: +30 à +50 FPS)").setRequired(false))
+    .addStringOption(o => o.setName("video").setDescription("Lien de la vidéo YouTube/Streamable de test in-game").setRequired(false))
+    .addStringOption(o => o.setName("details").setDescription("Détails et points forts du mod").setMaxLength(300).setRequired(false))
 ].map(c => c.toJSON());
 
 function checkRoleHierarchy(interaction, targetMember) {
@@ -234,7 +476,7 @@ async function handleCommand(interaction, client, config) {
       .addFields(
         {
           name: "⚡ Niveaux & Compétition",
-          value: "• `/rank [membre]` : Consulte votre carte de joueur et niveau d'XP\n• `/leaderboard [type]` : Affiche le top joueurs (Niveaux ou Coins)\n• `/rewards-info` : Paliers de récompenses et privilèges exclusifs"
+          value: "• `/rank [membre]` : Consulte votre carte de joueur et niveau d'XP\n• `/leaderboard [type]` : Affiche le top joueurs (Niveaux ou Coins)\n• `/rewards-info` : Paliers de récompenses et privilèges exclusifs\n• `/meme [fichier] [lien] [titre]` : 🎭 Publie un meme avec le design officiel NOVA PVP"
         },
         {
           name: "🎫 Tickets & Support",
@@ -246,11 +488,15 @@ async function handleCommand(interaction, client, config) {
         },
         {
           name: "⚖️ Modération & Salons",
-          value: "• `/clean [forcer]` : Vide entièrement un salon textuel (recréation propre)\n• `/purge <nombre>` : Supprime jusqu'à 100 messages récents\n• `/mod-ban <membre>` : Bannit un membre du serveur\n• `/mod-kick <membre>` : Expulse un membre du serveur\n• `/mod-timeout <membre>` : Exclut temporairement un membre"
+          value: "• `/announce [salon] [mention]` : 📢 Publie une annonce via un formulaire popup\n• `/clean [forcer]` : Vide entièrement un salon textuel (recréation propre)\n• `/purge <nombre>` : Supprime jusqu'à 100 messages récents\n• `/mod-ban <membre>` : Bannit un membre du serveur\n• `/mod-kick <membre>` : Expulse un membre du serveur\n• `/mod-timeout <membre>` : Exclut temporairement un membre"
+        },
+        {
+          name: "🏙️ FiveM PvP, Citizens & Scripts",
+          value: "• `/citizens [categorie]` : 🏙️ Découvre les meilleurs Citizens FiveM avec aperçu in-game\n• `/check-citizens` : *(Admin)* Force la publication de nouveaux Citizens dans #fivem-citizens\n• `/setup-citizens` : *(Admin)* Initialise le salon dédié #fivem-citizens\n• `/post-citizen` : *(Admin)* Publie un Citizen personnalisé avec rendu in-game\n• `/fivem-scripts [categorie]` : Scripts FiveM PvP gratuits vérifiés\n• `/pvp-clothing` : Packs de vêtements Brasil Cria FiveM"
         },
         {
           name: "⚙️ Système & Administration",
-          value: "• `/setup-nova` : *(Admin)* Configure l'architecture serveur complète\n• `/roles-panel` : *(Admin)* Déploie le sélecteur de rôles\n• `/voice-24-7` : *(Admin)* Maintient le bot connecté en vocal\n• `/setup-logs <salon>` : *(Admin)* Configure le salon d'audit\n• `/dashboard` : Tableau de bord web\n• `/ping` : Latence du bot"
+          value: "• `/setup-nova` : *(Admin)* Configure l'architecture serveur complète\n• `/test-boost [membre]` : *(Admin)* Simule la notification de Nitro Boost\n• `/emojis` : Affiche et copie les émojis du serveur\n• `/emoji-create <nom> <lien>` : *(Admin)* Ajoute un émoji animé/fixe\n• `/roles-panel` : *(Admin)* Déploie le sélecteur de rôles\n• `/voice-24-7` : *(Admin)* Maintient le bot connecté en vocal\n• `/setup-logs <salon>` : *(Admin)* Configure le salon d'audit\n• `/dashboard` : Tableau de bord web\n• `/ping` : Latence du bot"
         }
       )
       .setFooter({ text: "NOVA PVP System • Sécurité & Compétition" })
@@ -874,7 +1120,7 @@ async function handleCommand(interaction, client, config) {
 
       if (botLogsChannel) setSetting(`logs:${guild.id}`, botLogsChannel.id);
       if (supportCategory) setSetting(`ticket_category:${guild.id}`, supportCategory.id);
-      if (novaLobbyChannel) {
+      if (novaLobbyChannel && !process.env.VOICE_CHANNEL_ID) {
         setSetting(`voice_channel:${guild.id}`, novaLobbyChannel.id);
         enable247Voice(guild, novaLobbyChannel.id).catch(() => {});
       }
@@ -1548,12 +1794,769 @@ async function handleCommand(interaction, client, config) {
       ephemeral: true
     });
   }
+
+  // --- /test-boost ---
+  if (name === "test-boost") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+    const targetUser = interaction.options.getUser("membre") || interaction.user;
+    const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
+
+    if (!targetMember) {
+      return interaction.reply({ content: "❌ Membre introuvable sur ce serveur.", ephemeral: true });
+    }
+
+    const { handleBoost, resolveBoostChannel } = require("./boost");
+    const boostChannel = await resolveBoostChannel(guild, config);
+    const success = await handleBoost(targetMember, client, config, true);
+
+    if (success && boostChannel) {
+      return interaction.reply({
+        content: `✅ Notification officielle de **Nitro Boost** simulée avec succès dans ${boostChannel} pour ${targetMember} ! 🚀💜`,
+        ephemeral: true
+      });
+    } else {
+      return interaction.reply({
+        content: "❌ Impossible d'envoyer la notification de boost. Vérifiez que le salon des boosters existe et que le bot a les permissions nécessaires.",
+        ephemeral: true
+      });
+    }
+  }
+
+  // --- /emojis ---
+  if (name === "emojis") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+
+    const emojis = await guild.emojis.fetch().catch(() => guild.emojis.cache);
+    if (!emojis || emojis.size === 0) {
+      return interaction.reply({
+        content: "ℹ️ Aucun émoji personnalisé n'est encore installé sur ce serveur.",
+        ephemeral: true
+      });
+    }
+
+    const animated = emojis.filter(e => e.animated);
+    const staticEmojis = emojis.filter(e => !e.animated);
+
+    let desc = `Voici la liste des **${emojis.size} émojis officiels** de **${guild.name}** :\n\n`;
+
+    if (animated.size > 0) {
+      desc += `✨ **Émojis Animés (${animated.size}) :**\n`;
+      animated.forEach(e => {
+        desc += `${e} \`:${e.name}:\` ➔ \`${e.toString()}\`\n`;
+      });
+      desc += "\n";
+    }
+
+    if (staticEmojis.size > 0) {
+      desc += `🎨 **Émojis Fixes (${staticEmojis.size}) :**\n`;
+      staticEmojis.forEach(e => {
+        desc += `${e} \`:${e.name}:\` ➔ \`${e.toString()}\`\n`;
+      });
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x8B5CF6)
+      .setTitle("✨ Émojis Officiels du Serveur")
+      .setDescription(desc.slice(0, 4000))
+      .setFooter({ text: "Copiez le code pour utiliser l'émoji dans vos messages !" })
+      .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  // --- /emoji-create ---
+  if (name === "emoji-create") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+
+    const rawName = interaction.options.getString("nom");
+    const url = interaction.options.getString("lien");
+
+    const safeName = rawName.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 32);
+    if (safeName.length < 2) {
+      return interaction.reply({
+        content: "❌ Le nom de l'émoji doit contenir au moins 2 caractères alphanumériques.",
+        ephemeral: true
+      });
+    }
+
+    if (!isValidHttpUrl(url)) {
+      return interaction.reply({
+        content: "❌ Veuillez fournir une URL HTTP/HTTPS valide vers l'image ou le GIF.",
+        ephemeral: true
+      });
+    }
+
+    await interaction.deferReply();
+
+    try {
+      const created = await guild.emojis.create({
+        attachment: url,
+        name: safeName
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle("✅ Nouvel Émoji Créé avec Succès !")
+        .setDescription(
+          `L'émoji **${created.name}** a été ajouté au serveur !\n\n` +
+          `• **Aperçu :** ${created}\n` +
+          `• **Type :** ${created.animated ? "✨ Animé (GIF)" : "🎨 Fixe (PNG/JPG)"}\n` +
+          `• **Code Markdown :** \`${created.toString()}\`\n` +
+          `• **Utilisation :** Tapez \`:${created.name}:\` dans le chat`
+        )
+        .setThumbnail(created.imageURL())
+        .setFooter({ text: `Ajouté par ${interaction.user.tag}` })
+        .setTimestamp();
+
+      return interaction.editReply({ embeds: [embed] });
+    } catch (err) {
+      console.error("[Emoji Create Error]:", err.message);
+      return interaction.editReply({
+        content: `❌ Impossible de créer l'émoji : ${err.message}. (Assurez-vous que le fichier fait moins de 256 Ko).`
+      });
+    }
+  }
+
+  // --- /announce & /annonce ---
+  if (name === "announce" || name === "annonce") {
+    if (!guild) {
+      return interaction.reply({ content: "❌ Cette commande doit être exécutée sur un serveur.", ephemeral: true });
+    }
+
+    // Permission check for member
+    if (interaction.member && !interaction.member.permissions?.has(PermissionFlagsBits.ManageMessages) && !interaction.member.permissions?.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({
+        content: "❌ Vous devez avoir la permission **Gérer les messages** ou **Administrateur** pour créer une annonce.",
+        ephemeral: true
+      });
+    }
+
+    const targetChannel = interaction.options.getChannel("salon") || interaction.channel;
+    const mentionType = interaction.options.getString("mention") || "none";
+    const colorHex = interaction.options.getString("couleur") || "8B5CF6";
+
+    // Permission check for bot in target channel
+    const botPerms = targetChannel.permissionsFor(guild.members.me);
+    if (!botPerms?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+      return interaction.reply({
+        content: `❌ Le bot n'a pas les permissions requises (\`Voir le salon\`, \`Envoyer des messages\`, \`Intégrer des liens\`) dans <#${targetChannel.id}>.`,
+        ephemeral: true
+      });
+    }
+
+    // Modal customId format: modal_announce:<channelId>:<mention>:<colorHex>
+    const modal = new ModalBuilder()
+      .setCustomId(`modal_announce:${targetChannel.id}:${mentionType}:${colorHex}`)
+      .setTitle("📢 Créer une Annonce");
+
+    const titleInput = new TextInputBuilder()
+      .setCustomId("announce_title")
+      .setLabel("Titre de l'annonce")
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder("Ex: 🏆 TOURNOI OFFICIEL NOVA PVP — SAISON 1")
+      .setMaxLength(256)
+      .setRequired(true);
+
+    const messageInput = new TextInputBuilder()
+      .setCustomId("announce_message")
+      .setLabel("Message & Contenu (Markdown supporté)")
+      .setStyle(TextInputStyle.Paragraph)
+      .setPlaceholder("Écrivez votre annonce ici...\n(Markdown : **gras**, *italique*, listes, etc.)")
+      .setMaxLength(4000)
+      .setRequired(true);
+
+    const imageInput = new TextInputBuilder()
+      .setCustomId("announce_image")
+      .setLabel("Image ou GIF principal (URL directe)")
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder("https://... (PNG, JPG, GIF ou bannière au centre)")
+      .setMaxLength(500)
+      .setRequired(false);
+
+    const thumbnailInput = new TextInputBuilder()
+      .setCustomId("announce_thumbnail")
+      .setLabel("Miniature / Logo en haut à droite (URL)")
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder("https://... (Laisser vide pour utiliser le logo du serveur)")
+      .setMaxLength(500)
+      .setRequired(false);
+
+    const linkInput = new TextInputBuilder()
+      .setCustomId("announce_link")
+      .setLabel("Bouton Lien / Site web ou Discord (URL)")
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder("https://... (Ajoute un bouton cliquable sous l'annonce)")
+      .setMaxLength(500)
+      .setRequired(false);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(titleInput),
+      new ActionRowBuilder().addComponents(messageInput),
+      new ActionRowBuilder().addComponents(imageInput),
+      new ActionRowBuilder().addComponents(thumbnailInput),
+      new ActionRowBuilder().addComponents(linkInput)
+    );
+
+    return interaction.showModal(modal);
+  }
+
+  // --- /meme ---
+  if (name === "meme") {
+    if (!guild) return interaction.reply({ content: "Cette commande doit être exécutée dans un serveur.", ephemeral: true });
+
+    const attachment = interaction.options.getAttachment("fichier");
+    const link = interaction.options.getString("lien");
+    const title = interaction.options.getString("titre");
+    const memesChannelId = config.memesChannelId || "1561442808353652908";
+    const targetChannel = interaction.options.getChannel("salon") ||
+      guild.channels.cache.get(memesChannelId) ||
+      guild.channels.cache.find(c => c.name.includes("meme")) ||
+      interaction.channel;
+
+    if (!attachment && !link && !title) {
+      return interaction.reply({
+        content: "❌ Veuillez fournir au moins un fichier (image/vidéo), un lien ou une légende pour votre meme.",
+        ephemeral: true
+      });
+    }
+
+    const botPerms = targetChannel.permissionsFor(guild.members.me);
+    if (!botPerms?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+      return interaction.reply({
+        content: `❌ Le bot n'a pas les permissions requises dans <#${targetChannel.id}>.`,
+        ephemeral: true
+      });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const findEmoji = (names) => {
+      const cache = guild.emojis?.cache;
+      if (!cache) return null;
+      if (typeof cache.find === "function") {
+        return cache.find(e => names.includes(e.name))?.toString();
+      }
+      if (cache.values) {
+        return Array.from(cache.values()).find(e => names.includes(e.name))?.toString();
+      }
+      return null;
+    };
+
+    const novaLogo = findEmoji(["nova_logo", "nova_pvp"]) || "💎";
+    const trollEmoji = findEmoji(["troll_dance", "pepe_lmfao", "d7ak_cat"]) || "😂";
+
+    const memeEmbed = new EmbedBuilder()
+      .setColor(0x8B5CF6) // Electric Violet NOVA Theme
+      .setAuthor({
+        name: `🎭 Posté par ${interaction.member?.displayName || interaction.user.username}`,
+        iconURL: interaction.user.displayAvatarURL({ dynamic: true })
+      })
+      .setTitle(`${novaLogo} NOVA MEMES • ${title || "Zone Délire & Rigolade"}`)
+      .setFooter({
+        text: `NOVA PVP System • Espace Memes & Fun • Votez ci-dessous !`,
+        iconURL: guild.iconURL({ dynamic: true }) || client.user?.displayAvatarURL()
+      })
+      .setTimestamp();
+
+    if (title) {
+      memeEmbed.setDescription(`### 💬 « ${title} »\n\n${trollEmoji} *Votez pour ce meme avec les boutons ci-dessous !*`);
+    } else {
+      memeEmbed.setDescription(`${trollEmoji} *Votez pour ce meme avec les boutons ci-dessous !*`);
+    }
+
+    const files = [];
+    let extraContent = "";
+    const rawMedia = attachment?.url || link;
+
+    const isVideo = isVideoUrl(rawMedia) || (attachment && attachment.contentType && attachment.contentType.startsWith("video/"));
+    const isImage = isImageUrl(rawMedia) || (attachment && attachment.contentType && attachment.contentType.startsWith("image/"));
+
+    if (attachment) {
+      if (isImage) {
+        memeEmbed.setImage(attachment.url);
+      } else {
+        files.push(attachment);
+      }
+    } else if (link) {
+      if (isImage) {
+        memeEmbed.setImage(link);
+      } else {
+        extraContent = link;
+      }
+    }
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("meme_vote_laugh")
+        .setLabel("😂 0")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("meme_vote_skull")
+        .setLabel("💀 0")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("meme_vote_fire")
+        .setLabel("🔥 0")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("meme_vote_flop")
+        .setLabel("💩 0")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    const payload = {
+      embeds: [memeEmbed],
+      components: [row]
+    };
+
+    if (extraContent) payload.content = extraContent;
+    if (files.length > 0) payload.files = files;
+
+    try {
+      const sentMsg = await targetChannel.send(payload);
+
+      try {
+        addCoins(interaction.user.id, 25, "Partage de Meme NOVA");
+        addXp(interaction.user.id, 50);
+      } catch {}
+
+      return interaction.editReply({
+        content: `✅ **Meme publié avec succès !** ${trollEmoji}\n\n📍 **Salon :** <#${targetChannel.id}>\n🎁 **Récompense :** +25 Coins & +50 XP\n🔗 [Cliquez ici pour voir votre meme](${sentMsg.url})`
+      });
+    } catch (err) {
+      console.error("[Meme Send Error]:", err.message);
+      return interaction.editReply({
+        content: `❌ Une erreur est survenue lors de l'envoi du meme : ${err.message}`
+      });
+    }
+  }
+
+  // --- /free-games ---
+  if (name === "free-games") {
+    await interaction.deferReply();
+    const platform = interaction.options.getString("plateforme") || "pc";
+
+    try {
+      const games = await fetchFreeGames(platform);
+      if (!games || games.length === 0) {
+        return interaction.editReply({
+          content: "🎁 Aucun jeu gratuit disponible pour le moment sur cette sélection. Revenez plus tard !"
+        });
+      }
+
+      const topGames = games.slice(0, 3);
+      const embeds = [];
+      const rows = [];
+
+      for (const game of topGames) {
+        const { embed, row } = formatFreeGameEmbed(game, guild, client);
+        embeds.push(embed);
+        if (row && rows.length < 5) rows.push(row);
+      }
+
+      return interaction.editReply({
+        content: `🎮 **Voici les ${topGames.length} meilleurs jeux gratuits actuellement disponibles !**`,
+        embeds,
+        components: rows
+      });
+    } catch (err) {
+      console.error("[Free Games Command Error]:", err.message);
+      return interaction.editReply({
+        content: "❌ Une erreur est survenue lors de la récupération des jeux gratuits."
+      });
+    }
+  }
+
+  // --- /gaming-news ---
+  if (name === "gaming-news") {
+    await interaction.deferReply();
+
+    try {
+      const articles = await fetchGamingNews();
+      if (!articles || articles.length === 0) {
+        return interaction.editReply({
+          content: "⚡ Aucune actualité gaming disponible pour le moment."
+        });
+      }
+
+      const topArticles = articles.slice(0, 3);
+      const embeds = [];
+      const rows = [];
+
+      for (const article of topArticles) {
+        const { embed, row } = formatGamingNewsEmbed(article, guild, client);
+        embeds.push(embed);
+        if (row && rows.length < 5) rows.push(row);
+      }
+
+      return interaction.editReply({
+        content: `📰 **Dernières actualités & annonces jeux vidéo :**`,
+        embeds,
+        components: rows
+      });
+    } catch (err) {
+      console.error("[Gaming News Command Error]:", err.message);
+      return interaction.editReply({
+        content: "❌ Une erreur est survenue lors de la récupération des actualités gaming."
+      });
+    }
+  }
+
+  // --- /check-gaming ---
+  if (name === "check-gaming") {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "❌ Cette commande est réservée aux administrateurs.", ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const res = await checkAndPostGamingUpdates(client, config, { maxFreeGames: 5, maxNews: 3 });
+      const channelId = config.gamingChannelId || "1561442801642635496";
+
+      return interaction.editReply({
+        content: `✅ **Vérification Gaming Hub terminée !**\n\n🎁 **Nouveaux jeux gratuits postés :** ${res.freeGamesPosted}\n📰 **Nouvelles actualités postées :** ${res.newsPosted}\n📍 **Salon :** <#${channelId}>`
+      });
+    } catch (err) {
+      console.error("[Check Gaming Command Error]:", err.message);
+      return interaction.editReply({
+        content: `❌ Erreur lors de la vérification : ${err.message}`
+      });
+    }
+  }
+
+  // --- /fivem-scripts ---
+  if (name === "fivem-scripts") {
+    await interaction.deferReply();
+    const category = interaction.options.getString("categorie") || "all";
+
+    try {
+      let filtered = CURATED_PVP_SCRIPTS;
+      if (category === "weapons") {
+        filtered = CURATED_PVP_SCRIPTS.filter(s => s.category.includes("Armes"));
+      } else if (category === "arenas") {
+        filtered = CURATED_PVP_SCRIPTS.filter(s => s.category.includes("Arènes") || s.category.includes("Respawn"));
+      } else if (category === "crosshair") {
+        filtered = CURATED_PVP_SCRIPTS.filter(s => s.category.includes("Visée") || s.category.includes("Effets"));
+      } else if (category === "hud") {
+        filtered = CURATED_PVP_SCRIPTS.filter(s => s.category.includes("HUD") || s.category.includes("Stats"));
+      }
+
+      const topScripts = filtered.slice(0, 3);
+      const embeds = [];
+      const rows = [];
+
+      for (const script of topScripts) {
+        const { embed, row } = formatFivemScriptEmbed(script, guild, client);
+        embeds.push(embed);
+        if (row && rows.length < 5) rows.push(row);
+      }
+
+      return interaction.editReply({
+        content: `🛠️ **Voici les scripts FiveM PvP gratuits recommandés pour votre serveur :**`,
+        embeds,
+        components: rows
+      });
+    } catch (err) {
+      console.error("[FiveM Scripts Command Error]:", err.message);
+      return interaction.editReply({
+        content: "❌ Une erreur est survenue lors de la récupération des scripts FiveM."
+      });
+    }
+  }
+
+  // --- /check-scripts ---
+  if (name === "check-scripts") {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "❌ Cette commande est réservée aux administrateurs.", ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const res = await checkAndPostFivemScripts(client, config, { maxPosts: 5 });
+      const channelId = config.fivemScriptsChannelId || "1562682918101581824";
+
+      return interaction.editReply({
+        content: `✅ **Vérification des scripts FiveM terminée !**\n\n📦 **Nouveaux scripts FiveM postés :** ${res.scriptsPosted}\n📍 **Salon :** <#${channelId}>`
+      });
+    } catch (err) {
+      console.error("[Check Scripts Command Error]:", err.message);
+      return interaction.editReply({
+        content: `❌ Erreur lors de la vérification des scripts : ${err.message}`
+      });
+    }
+  }
+
+  // --- /pvp-clothing ---
+  if (name === "pvp-clothing") {
+    await interaction.deferReply();
+
+    try {
+      const topPacks = BRAZIL_PVP_CLOTHING_PACKS.slice(0, 3);
+      const embeds = [];
+      const rows = [];
+
+      for (const pack of topPacks) {
+        const { embed, row } = formatFivemClothingEmbed(pack, guild, client);
+        embeds.push(embed);
+        if (row && rows.length < 5) rows.push(row);
+      }
+
+      return interaction.editReply({
+        content: `👕 **Voici les meilleurs packs de vêtements FiveM PvP Brasil (Roupas de Cria) :**`,
+        embeds,
+        components: rows
+      });
+    } catch (err) {
+      console.error("[PVP Clothing Command Error]:", err.message);
+      return interaction.editReply({
+        content: "❌ Une erreur est survenue lors de la récupération des packs de vêtements."
+      });
+    }
+  }
+
+  // --- /check-clothing ---
+  if (name === "check-clothing") {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "❌ Cette commande est réservée aux administrateurs.", ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const res = await checkAndPostFivemClothing(client, config, { maxPosts: 6 });
+      const channelId = config.fivemClothingChannelId || "1562686766824165486";
+
+      return interaction.editReply({
+        content: `✅ **Vérification des vêtements FiveM PvP terminée !**\n\n👕 **Nouveaux packs de vêtements postés :** ${res.packsPosted}\n📍 **Salon :** <#${channelId}>`
+      });
+    } catch (err) {
+      console.error("[Check Clothing Command Error]:", err.message);
+      return interaction.editReply({
+        content: `❌ Erreur lors de la vérification : ${err.message}`
+      });
+    }
+  }
+
+  // --- /citizens ---
+  if (name === "citizens") {
+    await interaction.deferReply();
+    const category = interaction.options.getString("categorie") || "all";
+
+    try {
+      let filtered = CURATED_FIVEM_CITIZENS;
+      if (category === "fps") {
+        filtered = CURATED_FIVEM_CITIZENS.filter(c => c.category?.includes("FPS"));
+      } else if (category === "sky") {
+        filtered = CURATED_FIVEM_CITIZENS.filter(c => c.category?.includes("Galaxy") || c.category?.includes("Ciel"));
+      } else if (category === "blood") {
+        filtered = CURATED_FIVEM_CITIZENS.filter(c => c.category?.includes("Blood") || c.category?.includes("Tir"));
+      } else if (category === "realism") {
+        filtered = CURATED_FIVEM_CITIZENS.filter(c => c.category?.includes("Réalisme") || c.category?.includes("Visibilité"));
+      } else if (category === "audio") {
+        filtered = CURATED_FIVEM_CITIZENS.filter(c => c.category?.includes("Armes") || c.category?.includes("Sound"));
+      }
+
+      const topCitizens = filtered.slice(0, 3);
+      const embeds = [];
+      const rows = [];
+
+      for (const citizen of topCitizens) {
+        const { embed, row } = formatCitizenEmbed(citizen, guild, client);
+        embeds.push(embed);
+        if (row && rows.length < 5) rows.push(row);
+      }
+
+      return interaction.editReply({
+        content: `🏙️ **Voici les meilleurs Citizens FiveM PvP recommandés avec rendu in-game :**`,
+        embeds,
+        components: rows
+      });
+    } catch (err) {
+      console.error("[Citizens Command Error]:", err.message);
+      return interaction.editReply({
+        content: "❌ Une erreur est survenue lors de la récupération des Citizens FiveM."
+      });
+    }
+  }
+
+  // --- /check-citizens ---
+  if (name === "check-citizens") {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "❌ Cette commande est réservée aux administrateurs.", ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const res = await checkAndPostFivemCitizens(client, config, { maxPosts: 5 });
+      const channelId = res.channelId || config.fivemCitizensChannelId;
+
+      return interaction.editReply({
+        content: `✅ **Vérification des Citizens FiveM terminée !**\n\n🏙️ **Nouveaux Citizens postés :** ${res.citizensPosted}\n📍 **Salon showroom :** <#${channelId}>`
+      });
+    } catch (err) {
+      console.error("[Check Citizens Command Error]:", err.message);
+      return interaction.editReply({
+        content: `❌ Erreur lors de la vérification des Citizens : ${err.message}`
+      });
+    }
+  }
+
+  // --- /setup-citizens ---
+  if (name === "setup-citizens") {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "❌ Cette commande est réservée aux administrateurs.", ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const channel = await getOrCreateCitizensChannel(guild, client, config);
+      if (!channel) {
+        return interaction.editReply({
+          content: "❌ Impossible de créer ou trouver le salon #fivem-citizens. Vérifiez les permissions du bot."
+        });
+      }
+
+      // Automatically post initial batch of citizens
+      const postResult = await checkAndPostFivemCitizens(client, config, { maxPosts: 4 });
+
+      return interaction.editReply({
+        content: `✅ **Salon FiveM Citizens configuré avec succès !**\n\n📍 **Salon :** <#${channel.id}>\n🏙️ **Citizens avec aperçus in-game publiés :** ${postResult.citizensPosted}\n🔒 **Permissions :** Lecture seule pour les membres, publications réservées au bot et admins.`
+      });
+    } catch (err) {
+      console.error("[Setup Citizens Error]:", err.message);
+      return interaction.editReply({
+        content: `❌ Erreur lors de la configuration du salon : ${err.message}`
+      });
+    }
+  }
+
+  // --- /post-citizen ---
+  if (name === "post-citizen") {
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "❌ Cette commande est réservée aux administrateurs.", ephemeral: true });
+    }
+
+    const title = interaction.options.getString("titre");
+    const category = interaction.options.getString("categorie");
+    const imageUrl = interaction.options.getString("image")?.trim();
+    const downloadUrl = interaction.options.getString("lien")?.trim();
+    const fpsBoost = interaction.options.getString("fps_boost") || "🚀 Gain de fluidité PvP garanti";
+    const videoUrl = interaction.options.getString("video")?.trim();
+    const details = interaction.options.getString("details");
+
+    if (!isValidHttpUrl(imageUrl)) {
+      return interaction.reply({ content: "❌ Le lien de l'image de rendu in-game est invalide (doit commencer par http:// ou https://).", ephemeral: true });
+    }
+    if (!isValidHttpUrl(downloadUrl)) {
+      return interaction.reply({ content: "❌ Le lien de téléchargement est invalide (doit commencer par http:// ou https://).", ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const channel = await getOrCreateCitizensChannel(guild, client, config);
+      if (!channel) {
+        return interaction.editReply({ content: "❌ Salon #fivem-citizens introuvable." });
+      }
+
+      const customCitizen = {
+        id: `custom_citizen_${Date.now()}`,
+        title,
+        category,
+        author: interaction.user.tag,
+        fpsBoost,
+        sky: "Aperçu in-game fourni dans l'image ci-dessous",
+        effects: "Effets et visuels personnalisés",
+        water: "Textures optimisées",
+        audio: "Audio FiveM",
+        features: details ? [details] : ["Pack Citizen FiveM vérifié et partagé par l'équipe Staff."],
+        install: "Glissez le dossier 'citizen' dans FiveM Application Data.",
+        image: imageUrl,
+        downloadUrl,
+        videoUrl: videoUrl && isValidHttpUrl(videoUrl) ? videoUrl : null
+      };
+
+      const { embed, row } = formatCitizenEmbed(customCitizen, guild, client);
+      const payload = { embeds: [embed] };
+      if (row) payload.components = [row];
+
+      const sentMsg = await channel.send(payload);
+      const { recordFivemCitizenPost } = require("./db");
+      recordFivemCitizenPost(customCitizen.id, title, category, fpsBoost, downloadUrl);
+
+      await log(guild, "🏙️ Nouveau Citizen Publié", `Citizen "${title}" publié par ${interaction.user.tag} dans ${channel}.\n[Voir le message](${sentMsg.url})`, 0x8B5CF6, {
+        category: "mod",
+        userId: interaction.user.id
+      });
+
+      return interaction.editReply({
+        content: `✅ **Citizen publié avec succès !**\n\n📍 **Salon :** <#${channel.id}>\n🔗 **Lien direct :** [Cliquez ici pour voir la publication](${sentMsg.url})`
+      });
+    } catch (err) {
+      console.error("[Post Citizen Error]:", err.message);
+      return interaction.editReply({
+        content: `❌ Erreur lors de la publication du Citizen : ${err.message}`
+      });
+    }
+  }
 }
 
 async function handleButton(interaction, client, config) {
   const customId = interaction.customId;
   const guild = interaction.guild;
   if (!guild) return;
+
+  // 0. Meme Reaction Votes
+  if (customId.startsWith("meme_vote_")) {
+    const voteType = customId.replace("meme_vote_", "");
+    const messageId = interaction.message.id;
+    const userKey = `${messageId}:${interaction.user.id}`;
+
+    const currentVote = userMemeVotes.get(userKey);
+
+    const emojiMap = {
+      laugh: "😂",
+      skull: "💀",
+      fire: "🔥",
+      flop: "💩"
+    };
+
+    const actionRow = interaction.message.components[0];
+    if (!actionRow) return interaction.deferUpdate().catch(() => {});
+
+    const newRow = new ActionRowBuilder();
+
+    for (const comp of actionRow.components) {
+      const btn = ButtonBuilder.from(comp);
+      const btnType = comp.customId.replace("meme_vote_", "");
+      const parts = (comp.label || "").split(" ");
+      let count = parseInt(parts[1], 10) || 0;
+
+      if (btnType === voteType) {
+        if (currentVote === voteType) {
+          count = Math.max(0, count - 1);
+          userMemeVotes.delete(userKey);
+          btn.setStyle(ButtonStyle.Secondary);
+        } else {
+          count += 1;
+          userMemeVotes.set(userKey, voteType);
+          btn.setStyle(ButtonStyle.Primary);
+        }
+      } else if (btnType === currentVote) {
+        count = Math.max(0, count - 1);
+        btn.setStyle(ButtonStyle.Secondary);
+      }
+
+      btn.setLabel(`${emojiMap[btnType] || "⭐"} ${count}`);
+      newRow.addComponents(btn);
+    }
+
+    return interaction.update({ components: [newRow] });
+  }
 
   // 1. Ticket Creation via button
   if (customId === "ticket_create") {
@@ -1828,4 +2831,149 @@ async function handleButton(interaction, client, config) {
   }
 }
 
-module.exports = { commands, handleCommand, handleButton, checkRoleHierarchy };
+function isValidHttpUrl(string) {
+  if (!string || typeof string !== "string") return false;
+  try {
+    const url = new URL(string.trim());
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function handleModalSubmit(interaction, client, config) {
+  const customId = interaction.customId;
+  const guild = interaction.guild;
+  if (!guild) return;
+
+  if (customId.startsWith("modal_announce:")) {
+    const parts = customId.split(":");
+    const targetChannelId = parts[1];
+    const mentionType = parts[2] || "none";
+    const colorHex = parts[3] || "8B5CF6";
+
+    // Defer reply immediately so Discord doesn't timeout
+    await interaction.deferReply({ ephemeral: true });
+
+    const targetChannel = guild.channels.cache.get(targetChannelId) || await guild.channels.fetch(targetChannelId).catch(() => null);
+    if (!targetChannel || !targetChannel.isTextBased()) {
+      return interaction.editReply({
+        content: "❌ Le salon cible pour l'annonce est introuvable ou n'est plus accessible."
+      });
+    }
+
+    const botPerms = targetChannel.permissionsFor(guild.members.me);
+    if (!botPerms?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks])) {
+      return interaction.editReply({
+        content: `❌ Le bot n'a pas les permissions requises dans <#${targetChannel.id}> (\`Voir le salon\`, \`Envoyer des messages\`, \`Intégrer des liens\`).`
+      });
+    }
+
+    const title = interaction.fields.getTextInputValue("announce_title")?.trim();
+    const message = interaction.fields.getTextInputValue("announce_message")?.trim();
+    const imageUrl = interaction.fields.getTextInputValue("announce_image")?.trim();
+    const thumbnailUrl = interaction.fields.getTextInputValue("announce_thumbnail")?.trim();
+    const linkUrl = interaction.fields.getTextInputValue("announce_link")?.trim();
+
+    if (!title || !message) {
+      return interaction.editReply({
+        content: "❌ Le titre et le message de l'annonce sont obligatoires."
+      });
+    }
+
+    const intColor = parseInt(colorHex, 16) || 0x8B5CF6;
+
+    const embed = new EmbedBuilder()
+      .setColor(intColor)
+      .setTitle(title)
+      .setDescription(message)
+      .setAuthor({
+        name: guild.name,
+        iconURL: guild.iconURL({ dynamic: true }) || client.user.displayAvatarURL()
+      })
+      .setFooter({
+        text: `📢 Annonce Officielle • Par ${interaction.user.tag}`,
+        iconURL: interaction.user.displayAvatarURL({ dynamic: true })
+      })
+      .setTimestamp();
+
+    // Thumbnail: custom URL or fallback to server icon if available
+    if (thumbnailUrl && isValidHttpUrl(thumbnailUrl)) {
+      embed.setThumbnail(thumbnailUrl);
+    } else if (guild.iconURL()) {
+      embed.setThumbnail(guild.iconURL({ dynamic: true, size: 256 }));
+    }
+
+    // Main Image / Banner
+    if (imageUrl && isValidHttpUrl(imageUrl)) {
+      embed.setImage(imageUrl);
+    }
+
+    // Action button if a valid link URL is provided
+    const components = [];
+    if (linkUrl && isValidHttpUrl(linkUrl)) {
+      const button = new ButtonBuilder()
+        .setLabel("🔗 Accéder au lien")
+        .setStyle(ButtonStyle.Link)
+        .setURL(linkUrl);
+
+      components.push(new ActionRowBuilder().addComponents(button));
+    }
+
+    // Message payload
+    const payload = {
+      embeds: [embed],
+      allowedMentions: { parse: ["everyone", "roles", "users"] }
+    };
+
+    if (mentionType === "everyone") {
+      payload.content = "@everyone";
+    } else if (mentionType === "here") {
+      payload.content = "@here";
+    }
+
+    if (components.length > 0) {
+      payload.components = components;
+    }
+
+    try {
+      const sentMessage = await targetChannel.send(payload);
+
+      await interaction.editReply({
+        content: `✅ **Annonce publiée avec succès !**\n\n📍 **Salon :** <#${targetChannel.id}>\n🔗 **Lien du message :** [Cliquez ici pour voir l'annonce](${sentMessage.url})`
+      });
+
+      await log(guild, "📢 Nouvelle Annonce", `Annonce publiée par ${interaction.user.tag} dans ${targetChannel}.\n**Titre :** ${title}\n[Lien direct vers l'annonce](${sentMessage.url})`, intColor, {
+        category: "mod",
+        userId: interaction.user.id
+      });
+    } catch (err) {
+      console.error("[Announce Error]:", err);
+      return interaction.editReply({
+        content: `❌ Une erreur est survenue lors de l'envoi de l'annonce dans <#${targetChannel.id}> : ${err.message}`
+      });
+    }
+  }
+}
+
+function isVideoUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  const videoExts = [".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"];
+  const lower = url.toLowerCase().split("?")[0];
+  if (videoExts.some(ext => lower.endsWith(ext))) return true;
+  if (lower.includes("youtube.com") || lower.includes("youtu.be") || lower.includes("tiktok.com") || lower.includes("streamable.com") || lower.includes("twitter.com") || lower.includes("x.com")) {
+    return true;
+  }
+  return false;
+}
+
+function isImageUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  const imgExts = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
+  const lower = url.toLowerCase().split("?")[0];
+  return imgExts.some(ext => lower.endsWith(ext));
+}
+
+const userMemeVotes = new Map();
+
+module.exports = { commands, handleCommand, handleButton, handleModalSubmit, checkRoleHierarchy, isValidHttpUrl, isVideoUrl, isImageUrl };

@@ -7,6 +7,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "test": "node --test",
+    "setup:roles": "node src/setupNovaRoles.js",
     "build:dashboard": "npm run build --prefix dashboard",
     "dev:dashboard": "npm run dev --prefix dashboard"
   },

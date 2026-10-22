@@ -11,6 +11,41 @@ function sanitizeText(str) {
   return clean;
 }
 
+let cachedLogo = {
+  url: null,
+  expiresAt: 0
+};
+
+async function getNovaLogoUrl(guild) {
+  const now = Date.now();
+  if (cachedLogo.url && now < cachedLogo.expiresAt) {
+    return cachedLogo.url;
+  }
+
+  const logoMsgId = config.logoMessageId || process.env.LOGO_MESSAGE_ID || "1561452111634497698";
+  const logoChanId = config.logoChannelId || process.env.LOGO_CHANNEL_ID || "1561275464243478678";
+
+  if (logoMsgId && guild?.client) {
+    try {
+      const channel = guild.channels.cache.get(logoChanId) || await guild.channels.fetch(logoChanId).catch(() => null);
+      if (channel && channel.isTextBased()) {
+        const msg = await channel.messages.fetch(logoMsgId).catch(() => null);
+        const attachment = msg?.attachments?.first();
+        if (attachment?.url) {
+          cachedLogo.url = attachment.url;
+          cachedLogo.expiresAt = now + 2 * 3600 * 1000;
+          return cachedLogo.url;
+        }
+      }
+    } catch (e) {
+      console.warn("[Logger] Récupération du logo personnalisé :", e.message);
+    }
+  }
+
+  const botAvatar = guild?.client?.user?.displayAvatarURL({ dynamic: true, size: 512 });
+  return botAvatar || guild?.iconURL({ dynamic: true, size: 512 }) || null;
+}
+
 async function log(guild, title, description, color = 0x5865F2, options = {}) {
   const guildId = guild?.id || null;
   const safeTitle = sanitizeText(title).slice(0, 256);
@@ -38,11 +73,24 @@ async function log(guild, title, description, color = 0x5865F2, options = {}) {
     const channel = await guild.channels.fetch(channelId).catch(() => null);
     if (!channel || !channel.isTextBased()) return;
 
+    const logoUrl = await getNovaLogoUrl(guild);
+
     const embed = new EmbedBuilder()
       .setColor(color)
-      .setTitle(safeTitle)
+      .setAuthor({
+        name: `NOVA PVP • ${safeTitle}`,
+        iconURL: logoUrl || undefined
+      })
       .setDescription(safeDescription)
+      .setFooter({
+        text: `NOVA PVP • Surveillance Serveur`,
+        iconURL: logoUrl || undefined
+      })
       .setTimestamp();
+
+    if (logoUrl) {
+      embed.setThumbnail(logoUrl);
+    }
 
     if (options.fields && Array.isArray(options.fields)) {
       embed.addFields(options.fields.slice(0, 25));
@@ -54,4 +102,4 @@ async function log(guild, title, description, color = 0x5865F2, options = {}) {
   }
 }
 
-module.exports = { log, sanitizeText };
+module.exports = { log, sanitizeText, getNovaLogoUrl };

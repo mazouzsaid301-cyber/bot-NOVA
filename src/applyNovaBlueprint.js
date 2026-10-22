@@ -73,7 +73,8 @@ async function applyBlueprint() {
           { name: "🤝・find-a-team", type: ChannelType.GuildText },
           { name: "📸・media-zone", type: ChannelType.GuildText },
           { name: "😂・memes", type: ChannelType.GuildText },
-          { name: "💡・suggestions", type: ChannelType.GuildText }
+          { name: "💡・suggestions", type: ChannelType.GuildText },
+          { name: "🏙️・fivem-citizens", type: ChannelType.GuildText, readonly: true }
         ]
       },
       {
@@ -226,7 +227,7 @@ async function applyBlueprint() {
       setSetting(`ticket_category:${guild.id}`, supportCat.id);
       console.log(`[NOVA Setup] Catégorie de tickets configurée : ${supportCat.name} (${supportCat.id})`);
     }
-    if (novaLobbyChan) {
+    if (novaLobbyChan && !process.env.VOICE_CHANNEL_ID) {
       setSetting(`voice_channel:${guild.id}`, novaLobbyChan.id);
       console.log(`[NOVA Setup] Salon vocal 24/7 configuré : #${novaLobbyChan.name} (${novaLobbyChan.id})`);
       enable247Voice(guild, novaLobbyChan.id).catch(err => console.warn("[Voice Connect Note]:", err.message));

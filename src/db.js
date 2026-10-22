@@ -156,6 +156,36 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_guild ON audit_logs(guild_id, created_
 CREATE INDEX IF NOT EXISTS idx_moderation_guild ON moderation_actions(guild_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_economy_tx_created ON economy_transactions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_transcripts_guild ON ticket_transcripts(guild_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS gaming_feed_posts (
+  post_id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  source TEXT,
+  posted_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gaming_feed_posted_at ON gaming_feed_posts(posted_at DESC);
+
+CREATE TABLE IF NOT EXISTS fivem_scripts_posts (
+  script_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  author TEXT,
+  framework TEXT,
+  category TEXT,
+  link TEXT,
+  posted_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fivem_scripts_posted ON fivem_scripts_posts(posted_at DESC);
+
+CREATE TABLE IF NOT EXISTS fivem_citizens_posts (
+  citizen_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  category TEXT,
+  fps_boost TEXT,
+  link TEXT,
+  posted_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fivem_citizens_posted ON fivem_citizens_posts(posted_at DESC);
 ` );
 
 // Migration checks for existing databases
@@ -227,6 +257,18 @@ function transferCoins(fromUserId, toUserId, amount) {
   });
 
   return tx();
+}
+
+function addCoins(userId, amount, reason = "Bonus") {
+  ensureUser(userId);
+  const num = Math.floor(Number(amount));
+  if (!num || num <= 0) return 0;
+  const now = Date.now();
+  db.prepare("UPDATE users SET balance = balance + ?, updated_at = ? WHERE user_id = ?").run(num, now, userId);
+  db.prepare("INSERT INTO economy_transactions (type, from_user_id, to_user_id, amount, details, created_at) VALUES ('reward', 'SYSTEM', ?, ?, ?, ?)")
+    .run(userId, num, reason, now);
+  const user = db.prepare("SELECT balance FROM users WHERE user_id = ?").get(userId);
+  return user ? user.balance : 0;
 }
 
 function claimDaily(userId, amount = 100, cooldownMs = 86400000) {
@@ -494,12 +536,70 @@ function getTicketTranscript(channelId) {
   return db.prepare("SELECT * FROM ticket_transcripts WHERE channel_id = ?").get(channelId);
 }
 
+function isGamingFeedPosted(postId) {
+  if (!postId) return false;
+  const row = db.prepare("SELECT post_id FROM gaming_feed_posts WHERE post_id = ?").get(String(postId));
+  return Boolean(row);
+}
+
+function recordGamingFeedPost(postId, type, title, source = "") {
+  if (!postId) return;
+  const now = Date.now();
+  db.prepare(`
+    INSERT OR REPLACE INTO gaming_feed_posts (post_id, type, title, source, posted_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(String(postId), String(type || "free_game"), String(title || ""), String(source || ""), now);
+}
+
+function getRecentGamingFeedPosts(limit = 20) {
+  return db.prepare("SELECT * FROM gaming_feed_posts ORDER BY posted_at DESC LIMIT ?").all(Number(limit) || 20);
+}
+
+function isFivemScriptPosted(scriptId) {
+  if (!scriptId) return false;
+  const row = db.prepare("SELECT script_id FROM fivem_scripts_posts WHERE script_id = ?").get(String(scriptId));
+  return Boolean(row);
+}
+
+function recordFivemScriptPost(scriptId, title, author = "", framework = "", category = "", link = "") {
+  if (!scriptId) return;
+  const now = Date.now();
+  db.prepare(`
+    INSERT OR REPLACE INTO fivem_scripts_posts (script_id, title, author, framework, category, link, posted_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(String(scriptId), String(title || ""), String(author || ""), String(framework || ""), String(category || ""), String(link || ""), now);
+}
+
+function getRecentFivemScripts(limit = 20) {
+  return db.prepare("SELECT * FROM fivem_scripts_posts ORDER BY posted_at DESC LIMIT ?").all(Number(limit) || 20);
+}
+
+function isFivemCitizenPosted(citizenId) {
+  if (!citizenId) return false;
+  const row = db.prepare("SELECT citizen_id FROM fivem_citizens_posts WHERE citizen_id = ?").get(String(citizenId));
+  return Boolean(row);
+}
+
+function recordFivemCitizenPost(citizenId, title, category = "", fpsBoost = "", link = "") {
+  if (!citizenId) return;
+  const now = Date.now();
+  db.prepare(`
+    INSERT OR REPLACE INTO fivem_citizens_posts (citizen_id, title, category, fps_boost, link, posted_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(String(citizenId), String(title || ""), String(category || ""), String(fpsBoost || ""), String(link || ""), now);
+}
+
+function getRecentFivemCitizens(limit = 20) {
+  return db.prepare("SELECT * FROM fivem_citizens_posts ORDER BY posted_at DESC LIMIT ?").all(Number(limit) || 20);
+}
+
 module.exports = {
   db,
   ensureUser,
   getUser,
   getLeaderboard,
   transferCoins,
+  addCoins,
   claimDaily,
   createRedeemCode,
   claimRedeemCode,
@@ -524,5 +624,14 @@ module.exports = {
   getXpForLevel,
   getLevelFromXp,
   addXp,
-  getXpLeaderboard
+  getXpLeaderboard,
+  isGamingFeedPosted,
+  recordGamingFeedPost,
+  getRecentGamingFeedPosts,
+  isFivemScriptPosted,
+  recordFivemScriptPost,
+  getRecentFivemScripts,
+  isFivemCitizenPosted,
+  recordFivemCitizenPost,
+  getRecentFivemCitizens
 };
